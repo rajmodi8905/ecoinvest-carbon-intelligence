@@ -39,7 +39,7 @@ vercel --prod
 
 #### Option B: Vercel Dashboard
 1. Go to [vercel.com/new](https://vercel.com/new)
-2. Import your GitHub repository: `jilsnshah/final_team58`
+2. Import your GitHub repository: `rajmodi8905/ecoinvest-carbon-intelligence`
 3. Configure project:
    - **Framework Preset**: Vite
    - **Build Command**: `npm run build`
@@ -126,7 +126,7 @@ CORS_ORIGINS=https://your-vercel-app.vercel.app
 
 2. **Create Web Service**:
    - New → Web Service
-   - Connect repository: `jilsnshah/final_team58`
+   - Connect repository: `rajmodi8905/ecoinvest-carbon-intelligence`
    - Root Directory: `backend`
    - Build Command: `pip install -r requirements.txt`
    - Start Command: `gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT app:app`
@@ -214,7 +214,7 @@ git subtree push --prefix backend heroku main
 
 2. **Create App**:
    - Apps → Create App
-   - Connect GitHub: `jilsnshah/final_team58`
+   - Connect GitHub: `rajmodi8905/ecoinvest-carbon-intelligence`
    - Select `backend` directory
    - Choose Docker or Python runtime
 
