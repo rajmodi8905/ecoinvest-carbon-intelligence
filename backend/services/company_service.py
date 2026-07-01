@@ -36,6 +36,41 @@ class CompanyService:
         """Initialize Company Service"""
         self.pathway_reader = pathway_reader
         logger.info("✅ Company Service initialized")
+
+    def _fallback_response(self, company: Dict[str, Any], analysis_type: str) -> Dict[str, Any]:
+        """Return a deterministic non-AI response when Gemini/Tavily are unavailable."""
+        name = company.get('name', '')
+        ticker = company.get('ticker', '')
+        industry = company.get('industry', 'Unknown')
+        description = company.get('description', '').strip()
+        market_cap = company.get('market_cap', 'N/A')
+        esg_rating = company.get('esg_rating', 'N/A')
+        gii_score = company.get('gii_score', 0)
+
+        if analysis_type == 'insights':
+            fallback_text = f"""OVERVIEW:
+{name} ({ticker}) operates in the {industry} sector.
+{description or 'No detailed description is currently available from the database.'}
+
+SUSTAINABILITY POSITION:
+ESG rating: {esg_rating}. Green Innovation Score: {gii_score}/100. Market cap: {market_cap}.
+Add GOOGLE_API_KEY and TAVILY_API_KEY to enable AI-powered web research and richer sustainability analysis."""
+        else:
+            fallback_text = f"""OVERVIEW:
+{name} ({ticker}) is a {industry} company with the following available data: {description or 'No detailed company description is available yet.'}
+
+FUTURE IMPACT:
+The local backend is running without Gemini/Tavily, so this is a data-only summary. ESG rating: {esg_rating}, Green Innovation Score: {gii_score}/100, Market cap: {market_cap}.
+Add GOOGLE_API_KEY and TAVILY_API_KEY to enable the full AI-driven future impact workflow."""
+
+        return {
+            'success': True,
+            'data': {
+                'ticker': ticker,
+                'company_name': name,
+                'insights' if analysis_type == 'insights' else 'analysis': markdown.markdown(fallback_text, extensions=['nl2br', 'sane_lists'])
+            }
+        }
     
     # ============================================================================
     # API ENDPOINT: /api/company/<ticker>
@@ -124,9 +159,15 @@ class CompanyService:
             market_cap = company.get('market_cap', 'N/A')
             esg_rating = company.get('esg_rating', 'N/A')
             gii_score = company.get('gii_score', 0)
+
+            if not LANGCHAIN_AVAILABLE or not os.getenv('GOOGLE_API_KEY') or not os.getenv('TAVILY_API_KEY'):
+                return self._fallback_response(company, 'insights')
             
             # Use LangChain + Tavily agent to generate insights with web search
             llm = get_llm()
+
+            if not llm:
+                return self._fallback_response(company, 'insights')
             
             logger.info(f"🔍 Creating Tavily search agent for {name}...")
             
@@ -233,6 +274,9 @@ Keep the response concise."""
         
         # Get LLM
         llm = get_llm()
+
+        if not LANGCHAIN_AVAILABLE or not llm or not os.getenv('GOOGLE_API_KEY') or not os.getenv('TAVILY_API_KEY'):
+            return self._fallback_response(company, 'future_impact')
         
         # Import RAG services
         from services.news_rag_service import search_news
@@ -397,6 +441,12 @@ If data is missing or unverified, state that clearly. Keep the output concise.""
         
         # Get LLM
         llm = get_llm()
+
+        if not LANGCHAIN_AVAILABLE or not llm or not os.getenv('GOOGLE_API_KEY') or not os.getenv('TAVILY_API_KEY'):
+            return jsonify({
+                'success': False,
+                'error': 'AI chat is not configured yet. Add GOOGLE_API_KEY and TAVILY_API_KEY to enable it.'
+            }), 503
         
         # Import RAG services
         from services.news_rag_service import search_news

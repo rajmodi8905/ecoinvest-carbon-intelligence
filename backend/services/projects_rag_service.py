@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 # Vector store and embeddings
 LANGCHAIN_AVAILABLE = False
@@ -30,6 +30,7 @@ try:
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     print("⚠️ LangChain packages not available. Install with: pip install langchain-community faiss-cpu sentence-transformers")
+    Document = Any
 
 logger = logging.getLogger(__name__)
 

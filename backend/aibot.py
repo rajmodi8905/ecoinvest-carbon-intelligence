@@ -9,9 +9,25 @@ from flask import Blueprint, request, jsonify
 import logging
 import os
 import markdown
-from langgraph.prebuilt import create_react_agent
-from langchain_core.tools import tool
-from langgraph.checkpoint.memory import MemorySaver
+
+try:
+    from langgraph.prebuilt import create_react_agent
+    from langchain_core.tools import tool
+    from langgraph.checkpoint.memory import MemorySaver
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+
+    def tool(func=None, **kwargs):
+        if func is None:
+            def decorator(inner_func):
+                return inner_func
+
+            return decorator
+        return func
+
+    create_react_agent = None
+    MemorySaver = None
 
 import frontend_actions
 from llm_manager import get_llm
@@ -645,16 +661,19 @@ You're an expert guide helping users navigate sustainability investments, ESG an
 You're the comprehensive guide to sustainable investing - help users discover, analyze, and understand green investments!"""
 
 try:
+    if not LANGCHAIN_AVAILABLE:
+        raise ImportError("LangChain/LangGraph not installed")
+
     # Get shared LLM instance from centralized manager
     model = get_llm()
-    
+
     if not model:
         logger.error("❌ LLM not available - agent cannot be created")
         raise Exception("LLM initialization failed")
-    
+
     # Message limit trimming can be applied to state using a state_modifier, but for simplicity
     # we just use the system prompt as the state_modifier
-    
+
     # Create agent using modern langgraph API with memory support
     # MemorySaver provides conversation persistence across requests
     # This provides a production-ready agent implementation with ReAct loop
@@ -664,7 +683,7 @@ try:
         prompt=SYSTEM_PROMPT,
         checkpointer=MemorySaver()
     )
-    
+
     logger.info("✅ AI Chat agent initialized with 10-message limit and comprehensive tools (Gemini 2.5 Flash)")
 except Exception as e:
     logger.error(f"❌ Failed to initialize AI chat agent: {e}")
