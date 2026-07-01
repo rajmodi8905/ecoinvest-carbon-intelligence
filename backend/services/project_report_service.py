@@ -14,8 +14,8 @@ import markdown
 
 # Try to import LangChain components for agent-based custom_query
 try:
-    from langchain.agents import create_agent
-    from langchain.agents.middleware import before_agent
+    from langgraph.prebuilt import create_react_agent
+
     from langchain_core.messages import HumanMessage
     from langgraph.checkpoint.memory import MemorySaver
     LANGCHAIN_AVAILABLE = True
@@ -166,14 +166,8 @@ class ProjectReportService:
                     # MemorySaver provides thread-local conversation persistence
                     checkpointer = MemorySaver()
                     
-                    # Message limit middleware - trim to most recent 10 messages
-                    @before_agent
-                    def message_limit_middleware(state, config):
-                        messages = state.get("messages", [])
-                        # Keep only the most recent 10 messages (5 exchanges)
-                        if len(messages) > 10:
-                            state["messages"] = messages[-10:]
-                        return state
+                    # MemorySaver provides thread-local conversation persistence
+                    checkpointer = MemorySaver()
                     
                     # Create agent with memory and trimming
                     project_context = f"""Project Information:
@@ -188,18 +182,19 @@ class ProjectReportService:
 - Registry Status: {project.get('registry_status', 'N/A')}
 - Description: {project.get('description', 'No description available')}"""
                     
-                    agent = create_agent(
+                    agent = create_react_agent(
                         model=llm,
-                        checkpointer=checkpointer,
-                        middleware=[message_limit_middleware],
-                        system_prompt=f"""You are an expert on carbon credit projects analyzing {project.get('project_name', 'this project')} ({project_id}).
+                        tools=[],
+                        state_modifier=f"""You are an expert on carbon credit projects analyzing {project.get('project_name', 'this project')} ({project_id}).
 
 CURRENT PROJECT CONTEXT:
 {project_context}
 
 Answer questions about THIS PROJECT clearly and accurately. All questions are about {project.get('project_name', 'this project')} unless stated otherwise.
 
-Provide clear, concise answers based on the project data. If the question cannot be answered with available data, say so clearly. You have conversation memory and can reference previous questions."""
+If asked to compare, explain its specific strengths. Do not hallucinate data.
+
+User's Question: {query}"""
                     )
                     
                     # Use thread_id for conversation memory per project

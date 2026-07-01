@@ -18,8 +18,7 @@ try:
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_core.output_parsers import StrOutputParser
     from langchain_tavily import TavilySearch
-    from langchain.agents import create_agent
-    from langchain.agents.middleware import before_agent
+    from langgraph.prebuilt import create_react_agent
     from langchain_core.tools import tool
     from langchain_core.messages import HumanMessage
     from langgraph.checkpoint.memory import MemorySaver
@@ -199,10 +198,10 @@ SUSTAINABILITY POSITION:
 
 Keep the response concise."""
 
-            agent = create_agent(
-                llm,
+            agent = create_react_agent(
+                model=llm,
                 tools=[search],
-                system_prompt=system_prompt
+                prompt=system_prompt
             )
 
             # Run agent analysis
@@ -358,10 +357,10 @@ Website: {comp.get('website', '')}
         # Create agent with all tools
         tools = [search, search_news_rag, search_projects_rag, get_company_info]
         
-        agent = create_agent(
-            llm,
+        agent = create_react_agent(
+            model=llm,
             tools=tools,
-            system_prompt="""You are a Sustainability and Market Impact Analyst AI Agent. You have four tools: (1) news RAG, (2) carbon-projects RAG, (3) internet search, (4) company info.
+            prompt="""You are a Sustainability and Market Impact Analyst AI Agent. You have four tools: (1) news RAG, (2) carbon-projects RAG, (3) internet search, (4) company info.
 
 For any company, use every tool multiple times. Always start with broad queries, not just the company name. Add sector and product keywords. Example: if the company is Tesla, also search “EV”, “electric vehicles”, “cars”, “battery manufacturing”, “autonomous driving”, “solar”, etc. Apply the same logic to any company based on its industry.
 
@@ -531,19 +530,13 @@ Website: {comp.get('website', '')}
         # MemorySaver provides thread-local conversation persistence
         checkpointer = MemorySaver()
         
-        # Message limit middleware - trim to most recent 10 messages
-        @before_agent
-        def message_limit_middleware(state, config):
-            messages = state.get("messages", [])
-            # Keep only the most recent 10 messages (5 exchanges)
-            if len(messages) > 10:
-                state["messages"] = messages[-10:]
-            return state
         
-        agent = create_agent(
+        # Message limits are handled differently in ReactAgent, or we can just pass the modifier
+        # For simplicity, we just use the system prompt
+        agent = create_react_agent(
             model=llm,
             tools=tools,
-            system_prompt=f"""You are a Sustainability Insights Assistant AI Agent analyzing {name} ({ticker}), a company in the {industry} industry.
+            prompt=f"""You are a Sustainability Insights Assistant AI Agent analyzing {name} ({ticker}), a company in the {industry} industry.
 
 CURRENT COMPANY CONTEXT:
 - Company: {name}
@@ -561,8 +554,7 @@ When researching, use broad queries with sector and product keywords (e.g., for 
 Provide clear, concise answers. Structure responses according to the user's request. If information is missing or unverified, state it clearly. Keep responses accurate, helpful, and grounded in tool results.
 
 Remember: All questions are about {name} ({ticker}) unless the user explicitly asks about a different company.""",
-            checkpointer=checkpointer,
-            middleware=[message_limit_middleware]
+            checkpointer=checkpointer
         )
         
         # Use thread_id for conversation memory

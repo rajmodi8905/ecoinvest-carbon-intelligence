@@ -22,12 +22,8 @@ A full-stack ESG and carbon market intelligence platform with real-time data scr
 ### One-Command Startup
 
 ```bash
-# Start entire backend infrastructure
+# Start entire infrastructure (frontend, backend, databases, etc.)
 docker-compose up -d --build
-
-# Start frontend (in a new terminal)
-npm install
-npm run dev
 ```
 
 That's it! Everything starts together:
@@ -152,35 +148,22 @@ npm run build
 
 ### Environment Variables
 
-Create `.env` file in project root:
+Create a `.env` file in the project root:
 
 ```env
-# Backend API
+# Frontend Config
 VITE_API_URL=http://localhost:5001
 VITE_WS_URL=http://localhost:5001
-```
 
-Backend `.env` at `backend/.env`:
-
-```env
-# Flask Configuration
-FLASK_ENV=development
-FLASK_PORT=5000
-
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=carbon_intel
-DB_USER=carbon
-DB_PASSWORD=carbonpw
-
-# AI/LLM (REQUIRED)
+# AI/LLM (REQUIRED) - Docker Compose will read these
 GOOGLE_API_KEY=your_gemini_api_key_here
 TAVILY_API_KEY=your_tavily_api_key_here
 
 # Optional
 NEWS_API_KEY=your_newsapi_key_here
 ```
+
+(Note: If you run the backend locally without Docker, you should also have these in `backend/.env`)
 
 **Get API Keys:**
 - Google Gemini: https://makersuite.google.com/app/apikey

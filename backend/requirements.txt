@@ -33,3 +33,12 @@ redis>=5.0.0
 yfinance>=0.2.0
 grpcio>=1.60.0
 grpcio-tools>=1.60.0
+
+# AI and LLM Dependencies
+langchain
+langchain-community
+langchain-google-genai
+langgraph
+langchain-tavily
+sentence-transformers
+faiss-cpu
