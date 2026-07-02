@@ -3,56 +3,39 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import psycopg2
+import os
 from finance_scraper import run_finance_scraper
 from news_scraper import run_news_scraper
 from verra_scraper import run_verra_scraper
 
 print("🔥 Scraper service started")
 
+# Top 20 famous stocks/ETFs
 COMPANIES = [
-    "KRBN",   
-    "KCCA",   
-    "GRN",    
-    "CLNE",   
-    "ENPH",   
-    "PLUG",   
-    "FCEL",   
-    "BLNK",   
-    "CHPT",   
-    "CWEN",   
-    "NEE",    
-    "AY",     
-    "RUN",    
-    "SEDG",   
     "TSLA",   
     "MSFT",   
     "GOOGL",  
     "AAPL",   
     "AMZN",   
+    "ENPH",   
+    "PLUG",   
+    "FCEL",   
+    "BLNK",   
+    "CHPT",   
+    "NEE",    
+    "RUN",    
+    "SEDG",   
     "ORSTED", 
     "EQNR",   
-    "IBE",    
-    "DNNGY",  
-    "VST",    
-    "AES",    
-    "D",      
-    "DUK",    
-    "SO",     
     "ICLN",   
     "TAN",    
     "QCLN",   
-    "PBW",    
-    "ALB",    
-    "SQM",    
-    "MP",     
-    "LAC",    
-    "WM",     
-    "RSG",    
-    "WCN",    
-    "BEPC",   
-    "BEP",    
-    "HASI",   
+    "KRBN",
+    "BEPC",
 ]
+
+# Configurable scrape interval (in seconds)
+SCRAPE_INTERVAL_SECONDS = int(os.getenv("SCRAPE_INTERVAL_SECONDS", 30))
 
 CARBON_KEYWORDS = [
     "carbon credits",
@@ -132,9 +115,9 @@ while True:
         
         print("\n" + "="*60)
         print(f"✨ Scraper cycle complete: {completed}/3 successful")
-        print("⏳ Sleeping for 120 seconds (2 minutes)...")
+        print(f"⏳ Sleeping for {SCRAPE_INTERVAL_SECONDS} seconds...")
         print("="*60 + "\n")
-        time.sleep(120)  # Run every 2 minutes instead of 5
+        time.sleep(SCRAPE_INTERVAL_SECONDS)
 
     except Exception as e:
         print(f"❌ Main loop error: {e}")

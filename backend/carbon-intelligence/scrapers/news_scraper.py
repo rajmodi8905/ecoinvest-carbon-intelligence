@@ -9,7 +9,7 @@ import requests
 import feedparser
 import psycopg2
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -22,30 +22,22 @@ else:
     print(f"⚠️ .env file not found at {backend_env_path}")
 
 # Initialize Gemini model for sentiment analysis
-def get_gemini_model():
-    """Initialize and return Gemini model"""
-    # Check if API key is available
-    api_key = os.getenv('GOOGLE_API_KEY')
-    if not api_key:
-        print("⚠️ Warning: GOOGLE_API_KEY not found in environment variables")
-        print("⚠️ Falling back to keyword-based sentiment analysis")
-        return None
-    
+
+def get_ollama_model():
+    '''Initialize and return Ollama model'''
     try:
-        return ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",  # Using the correct model name
-            temperature=0.5,  # Increased for more opinionated responses
-            convert_system_message_to_human=False,  # Updated to avoid deprecation warning
-            google_api_key=api_key
+        return ChatOllama(
+            model="qwen2.5",
+            base_url="http://host.docker.internal:11434",
+            temperature=0.5,
         )
     except Exception as e:
-        print(f"⚠️ Warning: Failed to initialize Gemini model: {e}")
-        print("⚠️ Falling back to keyword-based sentiment analysis")
+        print(f"⚠️ Warning: Failed to initialize Ollama model: {e}")
         return None
 
 # Create sentiment analysis chain
 def create_sentiment_chain(llm):
-    """Create the sentiment analysis chain using Gemini"""
+    '''Create the sentiment analysis chain using Ollama'''
     if llm is None:
         return None
     
@@ -83,7 +75,7 @@ Respond with EXACTLY ONE WORD: Positive, Negative, or Neutral
     return prompt | llm | StrOutputParser()
 
 # Initialize global sentiment chain
-_llm = get_gemini_model()
+_llm = get_ollama_model()
 _sentiment_chain = create_sentiment_chain(_llm) if _llm else None
 
 # Sentiment keywords (fallback for when Gemini is unavailable)
@@ -131,8 +123,8 @@ def analyze_sentiment_fallback(title, summary):
         return "Neutral"
 
 def analyze_sentiment(title, summary):
-    """Gemini-based sentiment analysis with fallback"""
-    # Try using Gemini first
+    '''Ollama-based sentiment analysis with fallback'''
+    # Try using Ollama first
     if _sentiment_chain is not None:
         try:
             result = _sentiment_chain.invoke({
@@ -152,12 +144,12 @@ def analyze_sentiment(title, summary):
                 sentiment = sentiment.capitalize()
             
             if sentiment in ["Positive", "Negative", "Neutral"]:
-                print(f"🧠 Gemini: '{title[:50]}...' → {sentiment}")
+                print(f"🧠 Ollama: '{title[:50]}...' → {sentiment}")
                 return sentiment
             else:
-                print(f"⚠️ Unexpected Gemini response: '{result}' for: {title[:50]}")
+                print(f"⚠️ Unexpected Ollama response: '{result}' for: {title[:50]}")
         except Exception as e:
-            print(f"⚠️ Gemini error for '{title[:50]}...': {e}")
+            print(f"⚠️ Ollama error for '{title[:50]}...': {e}")
     
     # Fallback to keyword-based analysis
     fallback_result = analyze_sentiment_fallback(title, summary)
@@ -319,7 +311,13 @@ def run_news_scraper(keywords, companies, conn=None):
         print("🌐 Fetching from NewsAPI...")
         newsapi_articles = fetch_from_newsapi(news_api_key)
         
+        
+        articles_processed = 0
         for article in newsapi_articles:
+            if articles_processed >= 5:
+                break
+            articles_processed += 1
+
             try:
                 # Create unique ID from URL
                 guid = hashlib.md5(article['url'].encode()).hexdigest()
@@ -390,7 +388,12 @@ def run_news_scraper(keywords, companies, conn=None):
         try:
             feed = feedparser.parse(url)
 
+            
             for entry in feed.entries:
+                if articles_processed >= 10:
+                    break
+                articles_processed += 1
+
                 guid = hashlib.md5(entry.link.encode()).hexdigest()
                 news_id = f"news_{guid[:8]}"
 
@@ -477,7 +480,7 @@ def run_news_scraper(keywords, companies, conn=None):
 
 if __name__ == "__main__":
     print("🚀 Starting News Scraper...")
-    print(f"📊 Gemini Model: {'✅ Enabled' if _llm else '❌ Disabled (using fallback)'}")
+    print(f"📊 Ollama Model: {'✅ Enabled' if _llm else '❌ Disabled (using fallback)'}")
     
     try:
         # Run the scraper with empty keywords and companies (RSS feeds don't use them)

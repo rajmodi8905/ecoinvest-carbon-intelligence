@@ -90,11 +90,12 @@ set_project_service(project_report_service)
 set_projects_service(projects_service)
 set_live_news_service(live_news_service)
 
-# Initialize RAG services at startup
-if RAG_AVAILABLE:
-    logger.info("📚 Initializing RAG services...")
+# Initialize RAG services in background so server starts immediately
+def _init_rag_services():
+    """Background thread to initialize RAG vector stores."""
+    logger.info("📚 Initializing RAG services in background...")
     print("\n" + "="*70)
-    print("📚 INITIALIZING RAG VECTOR STORES")
+    print("📚 INITIALIZING RAG VECTOR STORES (background)")
     print("="*70)
     
     # Initialize News RAG
@@ -116,6 +117,11 @@ if RAG_AVAILABLE:
     print("="*70)
     print("✅ RAG SERVICES READY")
     print("="*70 + "\n")
+
+if RAG_AVAILABLE:
+    import threading
+    rag_thread = threading.Thread(target=_init_rag_services, daemon=True)
+    rag_thread.start()
 else:
     logger.warning("⚠️ RAG Services not available - install langchain-community, faiss-cpu, sentence-transformers")
 
