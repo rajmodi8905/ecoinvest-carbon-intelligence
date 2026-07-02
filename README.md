@@ -70,7 +70,7 @@ Frontend will be available at: http://localhost:5173
 
 ### AI Chatbot (`/api/chat`)
 
-Powered by **Google Gemini 2.0 Flash** with LangChain v1 agents:
+Powered by **Ollama (qwen2.5)** with LangChain v1 agents:
 
 **Capabilities:**
 - 🔍 **RAG Search** - News & carbon projects vector search
@@ -97,7 +97,7 @@ Powered by **Google Gemini 2.0 Flash** with LangChain v1 agents:
 ### Company Reports (`/api/company/:ticker`)
 
 - **Basic Details** - Stock price, ESG rating, GII score
-- **AI Insights** - Sustainability analysis powered by Gemini
+- **AI Insights** - Sustainability analysis powered by local LLM (Qwen) with PostgreSQL caching for instant reloads.
 - **Future Impact Analysis** - Multi-agent system using:
   - News RAG search
   - Projects RAG search  
@@ -155,7 +155,7 @@ Create a `.env` file in the project root:
 VITE_API_URL=http://localhost:5001
 VITE_WS_URL=http://localhost:5001
 
-# AI/LLM (REQUIRED) - Docker Compose will read these
+# AI/LLM (Optional) - Docker Compose uses local Ollama by default
 GOOGLE_API_KEY=your_gemini_api_key_here
 TAVILY_API_KEY=your_tavily_api_key_here
 
@@ -190,7 +190,8 @@ NEWS_API_KEY=your_newsapi_key_here
 
 ### AI/LLM Stack
 
-- **Google Gemini 2.0 Flash** - Primary LLM
+- **Ollama (qwen2.5)** - Primary LLM (Local)
+- **Google Gemini 2.0 Flash** - Alternative LLM via GOOGLE_API_KEY
 - **LangChain v1** - Agent framework
 - **LangGraph** - Agent orchestration with memory
 - **Tavily** - Web search tool

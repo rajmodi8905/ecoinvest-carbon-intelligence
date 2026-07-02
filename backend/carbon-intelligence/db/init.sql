@@ -87,3 +87,12 @@ CREATE TABLE IF NOT EXISTS pathway_news (
   time BIGINT,
   diff INTEGER DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS ai_insights_cache (
+  id SERIAL PRIMARY KEY,
+  entity_type VARCHAR(50), 
+  entity_id VARCHAR(100), 
+  insight_type VARCHAR(50), 
+  content TEXT, 
+  generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

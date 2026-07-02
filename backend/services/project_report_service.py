@@ -11,6 +11,7 @@ import logging
 from typing import Dict, Any, Optional
 from llm_manager import get_llm
 import markdown
+from .db_cache import get_cached_insight, set_cached_insight
 
 # Try to import LangChain components for agent-based custom_query
 try:
@@ -88,7 +89,7 @@ class ProjectReportService:
             logger.error(f"Error getting project details for {project_id}: {e}")
             return {'success': False, 'error': str(e)}
     
-    def generate_project_report(self, project_id: str) -> Dict[str, Any]:
+    def generate_project_report(self, project_id: str, force_refresh: bool = False, only_cached: bool = False) -> Dict[str, Any]:
         """
         Section 2: Generate AI-powered comprehensive report
         
@@ -106,6 +107,25 @@ class ProjectReportService:
             
             project = project_result['data']
             
+            # Check cache
+            if not force_refresh:
+                cached = get_cached_insight('project', project_id, 'report', expiry_hours=12)
+                if cached:
+                    return {
+                        'success': True,
+                        'data': {
+                            'report': cached,
+                            'generated': True
+                        }
+                    }
+            
+            if only_cached:
+                return {
+                    'success': False,
+                    'error': 'No cached report found',
+                    'cached_only': True
+                }
+            
             # Generate AI-powered report using centralized LLM
             ai_report = None
             llm = get_llm()
@@ -119,6 +139,9 @@ class ProjectReportService:
                     # Convert markdown to HTML for proper formatting
                     ai_report = markdown.markdown(ai_report_markdown, extensions=['nl2br', 'sane_lists'])
                     logger.info(f"✅ AI report generated for {project_id}")
+                    
+                    # Save to cache
+                    set_cached_insight('project', project_id, 'report', ai_report)
                 except Exception as e:
                     logger.error(f"LLM error for {project_id}: {e}")
                     ai_report = f"Report generation temporarily unavailable. Please try again later.\n\nError: {str(e)}"

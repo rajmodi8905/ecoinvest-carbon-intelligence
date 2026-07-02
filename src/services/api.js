@@ -173,8 +173,8 @@ export const getProjectById = async (id) => {
   return apiFetch(`/api/project/${id}`);
 };
 
-export const getProjectReport = async (id) => {
-  return apiFetch(`/api/project/${id}/report`);
+export const getProjectReport = async (id, forceRefresh = false, onlyCached = false) => {
+  return apiFetch(`/api/project/${id}/report?forceRefresh=${forceRefresh}&onlyCached=${onlyCached}`);
 };
 
 export const askProjectQuestion = async (id, query) => {
@@ -239,13 +239,13 @@ export const getCompanyById = async (ticker) => {
   return result;
 };
 
-export const getCompanyInsights = async (ticker) => {
-  const result = await apiFetch(`/api/company/${ticker}/insights`);
+export const getCompanyInsights = async (ticker, forceRefresh = false, onlyCached = false) => {
+  const result = await apiFetch(`/api/company/${ticker}/insights?forceRefresh=${forceRefresh}&onlyCached=${onlyCached}`);
   return result;
 };
 
-export const getFutureImpactAnalysis = async (ticker) => {
-  const result = await apiFetch(`/api/company/${ticker}/future-impact`);
+export const getFutureImpactAnalysis = async (ticker, forceRefresh = false, onlyCached = false) => {
+  const result = await apiFetch(`/api/company/${ticker}/future-impact?forceRefresh=${forceRefresh}&onlyCached=${onlyCached}`);
   return result;
 };
 

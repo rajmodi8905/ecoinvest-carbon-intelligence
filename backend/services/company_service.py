@@ -10,6 +10,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from llm_manager import get_llm
 import markdown
+from .db_cache import get_cached_insight, set_cached_insight
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,7 @@ Add GOOGLE_API_KEY and TAVILY_API_KEY to enable the full AI-driven future impact
     # ============================================================================
     # API ENDPOINT: /api/company/<ticker>/insights
     # ============================================================================
-    def get_company_insights(self, ticker: str) -> Dict[str, Any]:
+    def get_company_insights(self, ticker: str, force_refresh: bool = False, only_cached: bool = False) -> Dict[str, Any]:
         """
         Get general AI-powered insights using Tavily search agent
         Returns comprehensive analysis with web research
@@ -159,21 +160,38 @@ Add GOOGLE_API_KEY and TAVILY_API_KEY to enable the full AI-driven future impact
             esg_rating = company.get('esg_rating', 'N/A')
             gii_score = company.get('gii_score', 0)
 
-            if not LANGCHAIN_AVAILABLE or not os.getenv('GOOGLE_API_KEY') or not os.getenv('TAVILY_API_KEY'):
-                return self._fallback_response(company, 'insights')
-            
-            # Use LangChain + Tavily agent to generate insights with web search
+            # Check cache
+            if not force_refresh:
+                cached = get_cached_insight('company', ticker, 'insights', expiry_hours=12)
+                if cached:
+                    return {
+                        'success': True,
+                        'data': {
+                            'ticker': ticker,
+                            'company_name': name,
+                            'insights': cached
+                        }
+                    }
+
+            if only_cached:
+                return {
+                    'success': False,
+                    'error': 'No cached insights found',
+                    'cached_only': True
+                }
+
+            # Use LangChain agent to generate insights with web search if available
             llm = get_llm()
 
-            if not llm:
+            if not LANGCHAIN_AVAILABLE or not llm:
                 return self._fallback_response(company, 'insights')
             
-            logger.info(f"🔍 Creating Tavily search agent for {name}...")
+            logger.info(f"🔍 Creating search agent for {name}...")
             
-            # Create Tavily search tool
-            search = TavilySearch(
-                max_results=10           # Get more sources for analysis
-            )
+            # Create tools list
+            tools = []
+            if os.getenv('TAVILY_API_KEY'):
+                tools.append(TavilySearch(max_results=10))
             
             # Create agent with simple system prompt
             system_prompt = f"""You are a sustainability analyst. Given company information, research and provide insights.
@@ -198,36 +216,33 @@ SUSTAINABILITY POSITION:
 
 Keep the response concise."""
 
-            agent = create_react_agent(
-                model=llm,
-                tools=[search],
-                prompt=system_prompt
-            )
-
-            # Run agent analysis
-            logger.info(f"🤖 Running agent for {name}...")
-            result = agent.invoke({
-                "messages": [{"role": "user", "content": f"Research and analyze {name} ({ticker})"}]
-            })
-                                
-            # Extract the final response - handle multimodal content
-            last_message = result["messages"][-1]
-            if hasattr(last_message, 'content'):
-                content = last_message.content
-                # If content is a list (multimodal), extract only text parts
-                if isinstance(content, list):
-                    text_parts = [item.get('text', '') if isinstance(item, dict) else str(item) 
-                                  for item in content if isinstance(item, dict) and item.get('type') == 'text']
-                    insights_text = ' '.join(text_parts).strip()
-                else:
-                    insights_text = str(content).strip()
+            if tools:
+                agent = create_react_agent(
+                    model=llm,
+                    tools=tools,
+                    prompt=system_prompt
+                )
+                
+                # Run agent analysis
+                logger.info(f"🤖 Running agent for {name}...")
+                result = agent.invoke({
+                    "messages": [HumanMessage(content="Start your analysis now.")]
+                })
+                
+                # Extract output
+                insights_text = result["messages"][-1].content
             else:
-                insights_text = str(last_message)
+                # Fallback to pure LLM if no tools
+                response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content="Start your analysis now.")])
+                insights_text = response.content
             
             # Convert markdown to HTML for proper formatting
             insights_html = markdown.markdown(insights_text, extensions=['nl2br', 'sane_lists'])
                     
             logger.info(f"✅ Agent insights generated for {name}")
+            
+            # Save to cache
+            set_cached_insight('company', ticker, 'insights', insights_html)
                     
             return {
                 'success': True,
@@ -250,7 +265,7 @@ Keep the response concise."""
     # ============================================================================
     # API ENDPOINT: /api/company/<ticker>/future-impact
     # ============================================================================
-    def get_future_impact_analysis(self, ticker: str) -> Dict[str, Any]:
+    def get_future_impact_analysis(self, ticker: str, force_refresh: bool = False, only_cached: bool = False) -> Dict[str, Any]:
         """
         Get sustainability and future impact analysis for the company
         Uses AI agent with multiple tools: web search, news RAG, projects RAG, company info
@@ -271,10 +286,30 @@ Keep the response concise."""
         industry = company.get('industry', '')
         ticker_symbol = company.get('ticker', '')
         
+        # Check cache
+        if not force_refresh:
+            cached = get_cached_insight('company', ticker, 'future-impact', expiry_hours=12)
+            if cached:
+                return {
+                    'success': True,
+                    'data': {
+                        'ticker': ticker,
+                        'company_name': name,
+                        'analysis': cached
+                    }
+                }
+        
+        if only_cached:
+            return {
+                'success': False,
+                'error': 'No cached analysis found',
+                'cached_only': True
+            }
+        
         # Get LLM
         llm = get_llm()
 
-        if not LANGCHAIN_AVAILABLE or not llm or not os.getenv('GOOGLE_API_KEY') or not os.getenv('TAVILY_API_KEY'):
+        if not LANGCHAIN_AVAILABLE or not llm:
             return self._fallback_response(company, 'future_impact')
         
         # Import RAG services
@@ -349,13 +384,10 @@ Website: {comp.get('website', '')}
             except Exception as e:
                 return f"Error getting company info: {str(e)}"
         
-        # Create Tavily search tool
-        search = TavilySearch(
-            max_results=10
-        )
-        
         # Create agent with all tools
-        tools = [search, search_news_rag, search_projects_rag, get_company_info]
+        tools = [search_news_rag, search_projects_rag, get_company_info]
+        if os.getenv('TAVILY_API_KEY'):
+            tools.append(TavilySearch(max_results=10))
         
         agent = create_react_agent(
             model=llm,
@@ -406,6 +438,9 @@ If data is missing or unverified, state that clearly. Keep the output concise.""
         
         logger.info(f"✅ Future impact analysis generated for {name}")
         
+        # Save to cache
+        set_cached_insight('company', ticker, 'future-impact', analysis_html)
+        
         return {
             'success': True,
             'data': {
@@ -441,10 +476,10 @@ If data is missing or unverified, state that clearly. Keep the output concise.""
         # Get LLM
         llm = get_llm()
 
-        if not LANGCHAIN_AVAILABLE or not llm or not os.getenv('GOOGLE_API_KEY') or not os.getenv('TAVILY_API_KEY'):
+        if not LANGCHAIN_AVAILABLE or not llm:
             return jsonify({
                 'success': False,
-                'error': 'AI chat is not configured yet. Add GOOGLE_API_KEY and TAVILY_API_KEY to enable it.'
+                'error': 'AI chat is not configured yet. Ensure LLM is available.'
             }), 503
         
         # Import RAG services
@@ -519,19 +554,14 @@ Website: {comp.get('website', '')}
             except Exception as e:
                 return f"Error getting company info: {str(e)}"
         
-        # Create Tavily search tool
-        search = TavilySearch(
-            max_results=10
-        )
-        
-        # Create agent with all tools and built-in memory
-        tools = [search, search_news_rag, search_projects_rag, get_company_info]
+        # Create tools
+        tools = [search_news_rag, search_projects_rag, get_company_info]
+        if os.getenv('TAVILY_API_KEY'):
+            tools.append(TavilySearch(max_results=5))
         
         # MemorySaver provides thread-local conversation persistence
         checkpointer = MemorySaver()
         
-        
-        # Message limits are handled differently in ReactAgent, or we can just pass the modifier
         # For simplicity, we just use the system prompt
         agent = create_react_agent(
             model=llm,

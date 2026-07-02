@@ -42,3 +42,4 @@ langgraph
 langchain-tavily
 sentence-transformers
 faiss-cpu
+langchain-ollama

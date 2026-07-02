@@ -11,7 +11,7 @@ Supports two modes:
 - Gemini (default): Uses Google's Gemini API
 - Ollama: Uses local Ollama instance
 
-Mode selection via environment variable: LLM_MODE=gemini|ollama
+Mode selection via environment variable: LLM_MODE=ollama|gemini
 
 Benefits:
 - Single initialization (faster startup)
@@ -66,7 +66,7 @@ def _create_ollama_llm():
         
         # Get Ollama configuration from environment
         ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-        ollama_model = os.getenv('OLLAMA_MODEL', 'llama3.2')
+        ollama_model = os.getenv('OLLAMA_MODEL', 'qwen2.5')
         
         llm = ChatOllama(
             model=ollama_model,
@@ -89,16 +89,16 @@ def get_llm():
     Get or create the shared LLM instance (lazy loading).
     
     The LLM mode is determined by the LLM_MODE environment variable:
-    - 'gemini' (default): Uses Google Gemini API
-    - 'ollama': Uses local Ollama instance
+    - 'ollama' (default): Uses local Ollama instance
+    - 'gemini': Uses Google Gemini API
     
     Environment variables:
-    - LLM_MODE: 'gemini' or 'ollama' (default: 'gemini')
+    - LLM_MODE: 'gemini' or 'ollama' (default: 'ollama')
     - For Gemini:
       - GOOGLE_API_KEY or GEMINI_API_KEY: API key for Gemini
     - For Ollama:
       - OLLAMA_BASE_URL: Base URL for Ollama (default: 'http://localhost:11434')
-      - OLLAMA_MODEL: Model name (default: 'llama3.2')
+      - OLLAMA_MODEL: Model name (default: 'qwen2.5')
     
     Returns:
         LLM instance or None if not available
@@ -108,16 +108,16 @@ def get_llm():
     if _llm_initialized:
         return _llm_instance
     
-    # Get LLM mode from environment (default: gemini)
-    llm_mode = os.getenv('LLM_MODE', 'gemini').lower()
+    # Get LLM mode from environment (default: ollama)
+    llm_mode = os.getenv('LLM_MODE', 'ollama').lower()
     
     logger.info(f"🔧 Initializing LLM in {llm_mode.upper()} mode...")
     
     try:
-        if llm_mode == 'ollama':
-            _llm_instance = _create_ollama_llm()
-        else:  # Default to gemini
+        if llm_mode == 'gemini':
             _llm_instance = _create_gemini_llm()
+        else:  # Default to ollama
+            _llm_instance = _create_ollama_llm()
         
         _llm_initialized = True
         return _llm_instance
@@ -133,7 +133,7 @@ def is_llm_available() -> bool:
     if _llm_initialized:
         return _llm_instance is not None
     
-    llm_mode = os.getenv('LLM_MODE', 'gemini').lower()
+    llm_mode = os.getenv('LLM_MODE', 'ollama').lower()
     
     # Check if dependencies are available based on mode
     try:
@@ -150,7 +150,7 @@ def is_llm_available() -> bool:
 
 def get_llm_mode() -> str:
     """Get the current LLM mode"""
-    return os.getenv('LLM_MODE', 'gemini').lower()
+    return os.getenv('LLM_MODE', 'ollama').lower()
 
 def reset_llm():
     """Reset the LLM instance (useful for testing or switching modes)"""

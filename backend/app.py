@@ -282,7 +282,9 @@ def get_project_details(project_id):
 @app.route('/api/project/<project_id>/report', methods=['GET'])
 def get_project_report(project_id):
     """Section 2: Generate project report - calls ProjectReportService"""
-    result = project_report_service.generate_project_report(project_id)
+    force_refresh = request.args.get('forceRefresh', 'false').lower() == 'true'
+    only_cached = request.args.get('onlyCached', 'false').lower() == 'true'
+    result = project_report_service.generate_project_report(project_id, force_refresh, only_cached)
     return jsonify(result)
 
 @app.route('/api/project/<project_id>/custom-query', methods=['POST'])
@@ -377,13 +379,17 @@ def get_company_details(ticker):
 @app.route('/api/company/<ticker>/insights', methods=['GET'])
 def get_company_insights(ticker):
     """Get general company insights - calls CompanyService"""
-    result = company_service.get_company_insights(ticker)
+    force_refresh = request.args.get('forceRefresh', 'false').lower() == 'true'
+    only_cached = request.args.get('onlyCached', 'false').lower() == 'true'
+    result = company_service.get_company_insights(ticker, force_refresh, only_cached)
     return jsonify(result)
 
 @app.route('/api/company/<ticker>/future-impact', methods=['GET'])
 def get_future_impact_analysis(ticker):
     """Get sustainability and future impact analysis - calls CompanyService"""
-    result = company_service.get_future_impact_analysis(ticker)
+    force_refresh = request.args.get('forceRefresh', 'false').lower() == 'true'
+    only_cached = request.args.get('onlyCached', 'false').lower() == 'true'
+    result = company_service.get_future_impact_analysis(ticker, force_refresh, only_cached)
     return jsonify(result)
 
 @app.route('/api/company/<ticker>/custom-query', methods=['POST'])
