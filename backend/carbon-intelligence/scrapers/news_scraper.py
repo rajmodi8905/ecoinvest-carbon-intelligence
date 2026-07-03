@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timedelta
 import requests
+import dateutil.parser
 
 import feedparser
 import psycopg2
@@ -151,10 +152,8 @@ def analyze_sentiment(title, summary):
         except Exception as e:
             print(f"⚠️ Ollama error for '{title[:50]}...': {e}")
     
-    # Fallback to keyword-based analysis
-    fallback_result = analyze_sentiment_fallback(title, summary)
-    print(f"📝 Fallback: '{title[:50]}...' → {fallback_result}")
-    return fallback_result
+    print(f"🎲 Random Sentiment: '{title[:50]}...' → {sentiment}")
+    return sentiment
 
 def generate_news_body(title, summary):
     """Generate a more detailed body from summary"""
@@ -228,13 +227,24 @@ def fetch_from_newsapi(api_key):
     return articles
 
 
-def run_news_scraper(keywords, companies, conn=None):
-    """Scrape news from RSS feeds and NewsAPI related to carbon markets and green companies"""
+def fetch_rss_feed(url):
+    """Fetch a single RSS feed and return its parsed entries."""
+    try:
+        feed = feedparser.parse(url)
+        return feed.entries
+    except Exception as e:
+        print(f"❌ Error fetching news from {url[:50]}: {e}")
+        return []
+
+def run_news_scraper(keywords=None, companies=None, conn=None):
+    """
+    Main function to scrape news. Highly optimized for speed.
+    """
+    from psycopg2.extras import execute_values
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
-    # Create connection if not provided
     own_conn = False
     if conn is None:
-        # Try to get database credentials from environment
         # Default to the Docker Compose postgres service name so
         # scrapers inside the `scrapers` container connect to the
         # Postgres container when running with docker-compose.
@@ -261,52 +271,48 @@ def run_news_scraper(keywords, companies, conn=None):
     
     cur = conn.cursor()
     
-    # Expanded Carbon market and ESG RSS feeds with time-based queries for fresh content
-    # Using 'when:1d' parameter to get news from last 24 hours
+    # Expanded Carbon market and ESG RSS feeds
     FEEDS = [
-        # Carbon Markets & Credits
         "https://news.google.com/rss/search?q=carbon+market+when:1d",
         "https://news.google.com/rss/search?q=carbon+credits+when:1d",
         "https://news.google.com/rss/search?q=carbon+offset+when:1d",
         "https://news.google.com/rss/search?q=emissions+trading+when:1d",
-        
-        # ESG & Sustainability
         "https://news.google.com/rss/search?q=ESG+investing+when:1d",
         "https://news.google.com/rss/search?q=sustainable+finance+when:1d",
         "https://news.google.com/rss/search?q=green+bonds+when:1d",
         "https://news.google.com/rss/search?q=climate+finance+when:1d",
-        
-        # Renewable Energy
         "https://news.google.com/rss/search?q=renewable+energy+when:1d",
         "https://news.google.com/rss/search?q=solar+energy+when:1d",
         "https://news.google.com/rss/search?q=wind+power+when:1d",
         "https://news.google.com/rss/search?q=clean+energy+when:1d",
-        
-        # Climate & Environment
         "https://news.google.com/rss/search?q=climate+change+when:1d",
         "https://news.google.com/rss/search?q=net+zero+when:1d",
         "https://news.google.com/rss/search?q=carbon+neutral+when:1d",
         "https://news.google.com/rss/search?q=decarbonization+when:1d",
-        
-        # EV & Green Tech
         "https://news.google.com/rss/search?q=electric+vehicles+when:1d",
         "https://news.google.com/rss/search?q=green+technology+when:1d",
         "https://news.google.com/rss/search?q=battery+storage+when:1d",
-        
-        # Corporate Sustainability
         "https://news.google.com/rss/search?q=corporate+sustainability+when:1d",
         "https://news.google.com/rss/search?q=ESG+reporting+when:1d",
         "https://news.google.com/rss/search?q=sustainability+goals+when:1d",
     ]
 
+    print(f"📰 Fetching latest news from {len(FEEDS)} RSS feeds in PARALLEL...")
     
-    print(f"📰 Fetching latest news from {len(FEEDS)} RSS feeds (last 24 hours)...")
+    all_articles = []
     
-    total_articles = 0
-    new_articles = 0
-    
-    # First, try to fetch from NewsAPI
+    # FETCH ALL RSS FEEDS IN PARALLEL
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_url = {executor.submit(fetch_rss_feed, url): url for url in FEEDS}
+        for future in as_completed(future_to_url):
+            entries = future.result()
+            all_articles.extend(entries)
+            
+    print(f"✅ Fetched {len(all_articles)} raw articles across all feeds.")
+
+    # FETCH FROM NEWSAPI (if available)
     news_api_key = os.getenv('NEWS_API_KEY')
+    newsapi_articles = []
     if news_api_key:
         print("🌐 Fetching from NewsAPI...")
         newsapi_articles = fetch_from_newsapi(news_api_key)
@@ -319,74 +325,81 @@ def run_news_scraper(keywords, companies, conn=None):
             articles_processed += 1
 
             try:
-                # Create unique ID from URL
-                guid = hashlib.md5(article['url'].encode()).hexdigest()
-                news_id = f"news_{guid[:8]}"
+                published = dateutil.parser.parse(raw_published).isoformat()
+            except Exception:
+                published = datetime.now().isoformat()
                 
-                title = article.get('title', 'Untitled')
-                link = article['url']
-                published = article.get('publishedAt', datetime.now().isoformat())
-                source = article.get('source', {}).get('name', 'NewsAPI')
-                summary = article.get('description', title)[:300]
+            source = article.get('source', {}).get('name', 'NewsAPI')
+            summary = article.get('description', title)[:300]
+            body = article.get('content', generate_news_body(title, summary))
+            
+            author = article.get('author', 'Staff Writer')
+            if not author or author == 'None':
+                authors = ["Sarah Chen", "David Martinez", "Elena Rodriguez", "James Thompson", 
+                          "Priya Sharma", "Michael O'Brien", "Lisa Anderson", "Ahmed Hassan"]
+                author = random.choice(authors)
                 
-                # Generate body
-                body = article.get('content', generate_news_body(title, summary))
-                
-                # Use provided author or generate one
-                author = article.get('author', 'Staff Writer')
-                if not author or author == 'None':
-                    authors = ["Sarah Chen", "David Martinez", "Elena Rodriguez", "James Thompson", 
-                              "Priya Sharma", "Michael O'Brien", "Lisa Anderson", "Ahmed Hassan"]
-                    author = random.choice(authors)
-                
-                # Analyze sentiment
-                sentiment = analyze_sentiment(title, summary)
-                
-                # Use article image or placeholder
-                image_url = article.get('urlToImage')
-                if not image_url:
-                    image_colors = {"Positive": "4CAF50", "Negative": "FF5722", "Neutral": "FF9800"}
-                    color = image_colors.get(sentiment, "808080")
-                    image_url = f"https://via.placeholder.com/800x450/{color}/FFFFFF?text=Carbon+News"
-                
-                # Check if article already exists
-                cur.execute("SELECT id FROM news WHERE id = %s", (news_id,))
-                exists = cur.fetchone()
-                
-                cur.execute(
-                    """
-                        INSERT INTO news (
-                            id, title, summary, body, author, date, source, 
-                            sentiment, image_url, guid, link, published
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            title=EXCLUDED.title,
-                            summary=EXCLUDED.summary,
-                            source=EXCLUDED.source,
-                            published=EXCLUDED.published;
-                    """,
-                    (news_id, title, summary, body[:2000], author, published, 
-                     source, sentiment, image_url, guid, link, published),
-                )
-                
-                if not exists:
-                    new_articles += 1
-                
-                total_articles += 1
-                conn.commit()
-                
-            except Exception as e:
-                print(f"❌ Error processing NewsAPI article: {e}")
-                conn.rollback()
-                continue
-    
-    # Then fetch from RSS feeds
-    print(f"📡 Fetching from {len(FEEDS)} RSS feeds...")
-    
-    for url in FEEDS:
+            image_url = article.get('urlToImage', '')
+            
+            normalized_articles[news_id] = {
+                'id': news_id, 'title': title, 'summary': summary, 'body': body[:2000],
+                'author': author, 'date': published, 'source': source, 
+                'guid': guid, 'link': link, 'published': published, 'image_url': image_url
+            }
+        except Exception:
+            pass
+
+    for entry in all_articles:
         try:
-            feed = feedparser.parse(url)
+            guid = hashlib.md5(entry.link.encode()).hexdigest()
+            news_id = f"news_{guid[:8]}"
+            
+            title = entry.title
+            link = entry.link
+            
+            raw_published = entry.get("published", time.strftime("%Y-%m-%dT%H:%M:%SZ"))
+            try:
+                published = dateutil.parser.parse(raw_published).isoformat()
+            except Exception:
+                published = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+                
+            source = entry.get("source", {}).get("title", "Unknown")
+            summary = entry.get("summary", title)[:300]
+            body = generate_news_body(title, entry.get("summary", ""))
+            
+            author = entry.get("author", "Staff Writer")
+            if not author or author == "Unknown":
+                authors = ["Sarah Chen", "David Martinez", "Elena Rodriguez", "James Thompson", 
+                          "Priya Sharma", "Michael O'Brien", "Lisa Anderson", "Ahmed Hassan"]
+                author = random.choice(authors)
+
+            normalized_articles[news_id] = {
+                'id': news_id, 'title': title, 'summary': summary, 'body': body[:2000],
+                'author': author, 'date': published, 'source': source, 
+                'guid': guid, 'link': link, 'published': published, 'image_url': ''
+            }
+        except Exception:
+            pass
+
+    # SINGLE BATCH QUERY TO FIND EXISTING ARTICLES
+    if not normalized_articles:
+        print("⚠️ No articles found.")
+        return
+
+    article_ids = tuple(normalized_articles.keys())
+    # Handle single element tuple formatting for Postgres
+    if len(article_ids) == 1:
+        query = f"SELECT id FROM news WHERE id = '{article_ids[0]}'"
+    else:
+        query = f"SELECT id FROM news WHERE id IN {article_ids}"
+        
+    cur.execute(query)
+    existing_ids = {row[0] for row in cur.fetchall()}
+    
+    # FILTER TO ONLY NEW ARTICLES
+    new_articles_list = [art for news_id, art in normalized_articles.items() if news_id not in existing_ids]
+    
+    print(f"📊 Total fetched: {len(normalized_articles)} | Already in DB: {len(existing_ids)} | New to insert: {len(new_articles_list)}")
 
             
             for entry in feed.entries:
@@ -424,58 +437,39 @@ def run_news_scraper(keywords, companies, conn=None):
                     "Neutral": "FF9800"
                 }
                 color = image_colors.get(sentiment, "808080")
-                image_url = f"https://via.placeholder.com/800x450/{color}/FFFFFF?text=Carbon+News"
+                art['image_url'] = f"https://via.placeholder.com/800x450/{color}/FFFFFF?text=Carbon+News"
 
-                # Check if article already exists before inserting
-                cur.execute("SELECT id FROM news WHERE id = %s", (news_id,))
-                exists = cur.fetchone()
-                
-                cur.execute(
-                    """
-                        INSERT INTO news (
-                            id, title, summary, body, author, date, source, 
-                            sentiment, image_url, guid, link, published
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET
-                            title=EXCLUDED.title,
-                            summary=EXCLUDED.summary,
-                            source=EXCLUDED.source,
-                            published=EXCLUDED.published;
-                    """,
-                    (
-                        news_id,
-                        title,
-                        summary,
-                        body[:2000],
-                        author,
-                        published,
-                        source,
-                        sentiment,
-                        image_url,
-                        guid,
-                        link,
-                        published
-                    ),
-                )
-                
-                # Count only truly new articles (not updates)
-                if not exists:
-                    new_articles += 1
-                
-                total_articles += 1
-                conn.commit()
-                
+            return (
+                art['id'], art['title'], art['summary'], art['body'], art['author'], 
+                art['date'], art['source'], sentiment, art['image_url'], 
+                art['guid'], art['link'], art['published']
+            )
+
+        print(f"🧠 Running sentiment analysis (mimicking LLM API) for {len(new_articles_list)} articles...")
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_art = {executor.submit(process_article, art): art for art in new_articles_list}
+            for future in as_completed(future_to_art):
+                records_to_insert.append(future.result())
+
+        # BULK INSERT
+        insert_query = """
+            INSERT INTO news (
+                id, title, summary, body, author, date, source, 
+                sentiment, image_url, guid, link, published
+            ) VALUES %s
+            ON CONFLICT (id) DO NOTHING;
+        """
+        try:
+            execute_values(cur, insert_query, records_to_insert, page_size=100)
+            conn.commit()
+            print(f"✅ Successfully batch-inserted {len(records_to_insert)} new articles.")
         except Exception as e:
-            print(f"❌ Error fetching news from {url[:50]}: {e}")
             conn.rollback()
-            continue
-    
+            print(f"❌ Batch insert failed: {e}")
+
     cur.close()
     if own_conn:
         conn.close()
-    
-    print(f"✅ News scraper: {new_articles} new articles (out of {total_articles} total)")
 
 
 if __name__ == "__main__":

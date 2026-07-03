@@ -11,6 +11,13 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Patch for WebSocket support with eventlet
+# Disable Eventlet's buggy greendns which causes "Lookup timed out" errors
+os.environ['EVENTLET_NO_GREENDNS'] = 'yes'
+os.environ['EVENTLET_HUB'] = 'poll'
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -56,7 +63,6 @@ app.register_blueprint(aibot_bp)
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*", 
-    async_mode='threading',
     logger=False,  # Suppress socketio logs
     engineio_logger=False,  # Suppress engine.io logs
     ping_timeout=60,  # Increase timeout for slower connections
@@ -176,6 +182,16 @@ def handle_watchlist_update(data):
     except Exception as e:
         logger.error(f"Error handling watchlist update: {e}")
 
+import json
+
+def serialize_for_socket(data):
+    class DateTimeEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            return super().default(obj)
+    return json.loads(json.dumps(data, cls=DateTimeEncoder))
+
 # Background data pusher - broadcasts on data changes
 def background_data_pusher():
     """Monitor for data changes and broadcast immediately"""
@@ -193,18 +209,35 @@ def background_data_pusher():
                 if last_broadcast is None or (now - last_broadcast) >= min_broadcast_interval:
                     analytics = analytics_service.get_dashboard_analytics()
                     # Broadcast to all clients - send the full analytics object
-                    socketio.emit('data_update', {
+                    socketio.emit('data_update', serialize_for_socket({
                         'analytics': analytics,
                         'timestamp': datetime.now().isoformat()
-                    })
+                    }))
+                    
+                    # Also broadcast specific data updates for live feeds
+                    news_result = live_news_service.get_live_news(limit=50)
+                    socketio.emit('news_update', serialize_for_socket(news_result))
+                    
+                    projects_result = projects_service.get_all_projects(limit=100)
+                    socketio.emit('projects_update', serialize_for_socket(projects_result))
+                    
+                    companies = watchlist_service.get_all_companies()
+                    socketio.emit('finance_update', serialize_for_socket({'success': True, 'data': companies}))
+                    
+                    market_alerts = pathway_reader.get_market_alerts()
+                    sentiment_index = pathway_reader.get_sentiment_index()
+                    socketio.emit('insights_update', serialize_for_socket({
+                        'alerts': market_alerts, 
+                        'sentiment_index': sentiment_index
+                    }))
+                    
                     logger.info("🔴 LIVE UPDATE: Broadcasting data changes to all clients")
                     last_broadcast = now
         except Exception as e:
             logger.error(f"Error in background pusher: {e}")
             time.sleep(1)
 
-pusher_thread = threading.Thread(target=background_data_pusher, daemon=True)
-pusher_thread.start()
+pusher_thread = socketio.start_background_task(background_data_pusher)
 
 # ============================================================================
 # REST API ENDPOINTS

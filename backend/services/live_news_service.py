@@ -39,10 +39,11 @@ class LiveNewsService:
         try:
             news_data = self.pathway_reader.get_news(source=source, limit=limit)
             
-            # Sort by published date (most recent first)
+            # We now sort by inserted_at to ensure newly scraped items appear first,
+            # falling back to published date if inserted_at is missing.
             news_data = sorted(
                 news_data, 
-                key=lambda x: x.get('published', ''), 
+                key=lambda x: str(x.get('inserted_at', '')) or str(x.get('published', '')), 
                 reverse=True
             )
             

@@ -79,39 +79,16 @@ def get_connection():
 
 conn = get_connection()
 
-def run_scraper_task(scraper_name, scraper_func, *args):
-    """Run a scraper task with error handling"""
-    try:
-        print(f"📌 Running {scraper_name} scraper...")
-        scraper_func(*args)
-        print(f"✅ {scraper_name} scraper completed")
-        return True
-    except Exception as e:
-        print(f"❌ {scraper_name} scraper error: {e}")
-        return False
-
-while True:
-    try:
-        print("\n" + "="*60)
-        print("🚀 Starting parallel scraper run...")
-        print("="*60)
-        
-        # Create separate connections for each thread to avoid conflicts
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [
-                executor.submit(run_scraper_task, "Verra", run_verra_scraper, None),
-                # Carbonmark scraper disabled - using only Verra for projects
-                # executor.submit(run_scraper_task, "Carbonmark", run_carbonmark_scraper, None),
-                executor.submit(run_scraper_task, "Finance", run_finance_scraper, None, COMPANIES),
-                executor.submit(run_scraper_task, "News", run_news_scraper, CARBON_KEYWORDS, COMPANIES, None)
-            ]
-            
-            # Wait for all to complete
-            completed = 0
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    completed += 1
+def run_continuous_scraper(scraper_name, scraper_func, interval_seconds, *args):
+    """Run a scraper task continuously in its own isolated thread."""
+    print(f"🚀 Starting continuous loop for {scraper_name} scraper (interval: {interval_seconds}s)")
+    while True:
+        try:
+            print(f"📌 [START] {scraper_name} scraper...")
+            scraper_func(*args)
+            print(f"✅ [DONE] {scraper_name} scraper. Sleeping for {interval_seconds}s...")
+        except Exception as e:
+            print(f"❌ [ERROR] {scraper_name} scraper failed: {e}. Sleeping for {interval_seconds}s...")
         
         print("\n" + "="*60)
         print(f"✨ Scraper cycle complete: {completed}/3 successful")
@@ -119,6 +96,41 @@ while True:
         print("="*60 + "\n")
         time.sleep(SCRAPE_INTERVAL_SECONDS)
 
-    except Exception as e:
-        print(f"❌ Main loop error: {e}")
-        time.sleep(30)
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("🚀 Starting independent scraper microservices...")
+    print("="*60)
+    
+    threads = []
+    
+    # 1. News Scraper: Runs every 10 seconds (Extremely fast, highly concurrent)
+    t_news = threading.Thread(
+        target=run_continuous_scraper, 
+        args=("News", run_news_scraper, 10, CARBON_KEYWORDS, COMPANIES, None),
+        daemon=True
+    )
+    threads.append(t_news)
+    
+    # 2. Finance Scraper: Unpaused & Optimized
+    t_finance = threading.Thread(
+        target=run_continuous_scraper, 
+        args=("Finance", run_finance_scraper, 10, None, COMPANIES),
+        daemon=True
+    )
+    threads.append(t_finance)
+    
+    # 3. Verra Scraper: Temporarily Paused
+    # t_verra = threading.Thread(
+    #     target=run_continuous_scraper, 
+    #     args=("Verra", run_verra_scraper, 60, None),
+    #     daemon=True
+    # )
+    # threads.append(t_verra)
+    
+    # Start all independent threads
+    for t in threads:
+        t.start()
+        
+    # Keep the main process alive forever
+    while True:
+        time.sleep(3600)

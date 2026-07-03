@@ -23,6 +23,8 @@ class PathwayDataReader:
         self.projects_file = os.path.join(pathway_output_dir, "projects.jsonl")
         self.finance_file = os.path.join(pathway_output_dir, "finance.jsonl")
         self.news_file = os.path.join(pathway_output_dir, "news.jsonl")
+        self.alerts_file = os.path.join(pathway_output_dir, "market_alerts.jsonl")
+        self.sentiment_file = os.path.join(pathway_output_dir, "sentiment_index.jsonl")
         
         # Database connection for direct access
         self.db_config = {
@@ -38,7 +40,9 @@ class PathwayDataReader:
         self._cache = {
             'projects': {'data': [], 'timestamp': None, 'file_mtime': None},
             'finance': {'data': [], 'timestamp': None, 'file_mtime': None},
-            'news': {'data': [], 'timestamp': None, 'file_mtime': None}
+            'news': {'data': [], 'timestamp': None, 'file_mtime': None},
+            'alerts': {'data': [], 'timestamp': None, 'file_mtime': None},
+            'sentiment': {'data': [], 'timestamp': None, 'file_mtime': None}
         }
         self._cache_ttl = 2  # Cache for 2 seconds minimum (to avoid thrashing)
         
@@ -81,6 +85,14 @@ class PathwayDataReader:
             logger.error(f"Error reading {filepath}: {e}")
         
         return records
+
+    def get_market_alerts(self):
+        """Get the latest market alerts from Pathway stream."""
+        return self._read_jsonl_file(self.alerts_file)
+        
+    def get_sentiment_index(self):
+        """Get the live sentiment index counts."""
+        return self._read_jsonl_file(self.sentiment_file)
     
     def _file_changed(self, filepath: str, cache_key: str) -> bool:
         """Check if file has been modified"""
@@ -206,7 +218,7 @@ class PathwayDataReader:
                     query += " WHERE source = %s"
                     params.append(source)
                 
-                query += f" ORDER BY published DESC LIMIT {limit}"
+                query += f" ORDER BY inserted_at DESC LIMIT {limit}"
                 
                 cur.execute(query, params)
                 news_data = [dict(row) for row in cur.fetchall()]
@@ -273,15 +285,15 @@ class PathwayDataReader:
         }
     
     def has_changes(self) -> bool:
-        """Check if any data files have been modified since last read"""
-        # If using database, don't rely on file changes (database changes via CDC/Kafka)
-        if self.use_db:
-            return False  # Database updates are handled differently, not file-based
-        
+        # We still monitor JSONL files for changes even if use_db is True,
+        # because Debezium updates the JSONL files whenever the database changes.
+        # This acts as our change-detection mechanism for WebSocket broadcasts.
         files_to_check = [
             ('projects', self.projects_file),
             ('finance', self.finance_file),
-            ('news', self.news_file)
+            ('news', self.news_file),
+            ('alerts', self.alerts_file),
+            ('sentiment', self.sentiment_file)
         ]
         
         for cache_key, filepath in files_to_check:

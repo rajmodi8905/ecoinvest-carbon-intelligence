@@ -73,8 +73,8 @@ const ReportPage = () => {
   React.useEffect(() => {
     const fetchData = async () => {
       // Prevent double-fetch in React StrictMode (development only)
-      if (hasFetched.current) return;
-      hasFetched.current = true;
+      if (hasFetched.current === id) return;
+      hasFetched.current = id;
       
       try {
         setLoading(true);
@@ -116,10 +116,7 @@ const ReportPage = () => {
 
     fetchData();
     
-    // Reset fetch flag when id changes
-    return () => {
-      hasFetched.current = false;
-    };
+    // No cleanup needed since we check id directly
   }, [id]);
 
   const generateAIInsights = async (forceRefresh = false) => {

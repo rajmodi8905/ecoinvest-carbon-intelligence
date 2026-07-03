@@ -301,7 +301,7 @@ def store_finance_data(cursor, ticker, price_data, esg_data=None):
             ticker, company_name, price, stock_price, change_percent,
             industry, description, gii_score, sustainability_update,
             esg_rating, website, market_cap
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES %s
         ON CONFLICT (ticker) DO UPDATE SET
             price = EXCLUDED.price,
             stock_price = EXCLUDED.stock_price,
@@ -351,37 +351,55 @@ def run_finance_scraper(conn=None, tickers=None):
     print("=" * 60)
     
     cursor = conn.cursor()
-    successful = 0
-    failed = 0
     
-    for idx, ticker in enumerate(tickers, 1):
-        print(f"\n[{idx}/{len(tickers)}] {ticker}")
-        
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    def process_ticker(ticker):
         try:
-            # Fetch price data
+            print(f"🔍 Fetching {ticker}...")
             price_data = fetch_stock_data(ticker)
-            
             if price_data:
-                # Fetch ESG data
                 esg_data = fetch_esg_from_yahoo(ticker)
                 
-                # Store combined data
-                store_finance_data(cursor, ticker, price_data, esg_data)
-                conn.commit()
-                successful += 1
-            else:
-                failed += 1
+                info = COMPANY_INFO.get(ticker, {})
+                change_pct = price_data['change_percent']
+                gii_score = max(0, min(100, 50 + change_pct * 2))
+                
+                esg_rating = esg_data['esg_rating'] if esg_data and esg_data.get('esg_rating') else 'B'
+                if not esg_data or not esg_data.get('esg_rating'):
+                    print(f"   ⚠️  ESG [{ticker}]: Using default rating")
+                
+                return (
+                    ticker, info.get('name', ticker), price_data['price'], price_data['price'],
+                    change_pct, info.get('industry', 'Technology'), info.get('description', f'{ticker} company'),
+                    gii_score, f"Recent sustainability initiatives for {ticker}", esg_rating,
+                    info.get('website', f'https://www.{ticker.lower()}.com'), info.get('market_cap', 'N/A')
+                )
         except Exception as e:
-            print(f"❌ Error storing {ticker}: {e}")
-            conn.rollback()  # Rollback transaction on error
-            failed += 1
-        
-        # Rate limiting between tickers
-        if idx < len(tickers):
-            delay = random.uniform(5, 10)
-            print(f"⏳ Wait {delay:.1f}s before next ticker...")
-            time.sleep(delay)
+            print(f"❌ Error processing {ticker}: {e}")
+        return None
+
+    records = []
+    print("📰 Fetching latest finance data in PARALLEL...")
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_ticker = {executor.submit(process_ticker, t): t for t in tickers}
+        for future in as_completed(future_to_ticker):
+            result = future.result()
+            if result:
+                records.append(result)
     
+    successful = len(records)
+    failed = len(tickers) - successful
+    
+    if records:
+        try:
+            store_finance_data_batch(cursor, records)
+            conn.commit()
+            print(f"✅ Successfully batch-upserted {len(records)} finance records.")
+        except Exception as e:
+            print(f"❌ Batch insert failed: {e}")
+            conn.rollback()
+
     cursor.close()
     if own_conn:
         conn.close()

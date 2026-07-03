@@ -71,6 +71,13 @@ export const initWebSocket = () => {
     }
   });
 
+  // Insights updates (Pathway Advanced Stream Analytics)
+  socket.on("insights_update", (data) => {
+    if (socketCallbacks.insights) {
+      socketCallbacks.insights(data);
+    }
+  });
+
   // Frontend action listeners
   socket.on("change_theme", (data) => {
     console.log("🎨 Received change_theme event:", data);

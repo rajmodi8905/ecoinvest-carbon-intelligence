@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS news (
   image_url TEXT,
   guid TEXT,
   link TEXT,
-  published TEXT
+  published TEXT,
+  inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Pathway output tables

@@ -14,7 +14,7 @@ services:
       - ./backend/carbon-intelligence/db/init.sql:/docker-entrypoint-initdb.d/init.sql
       - ./backend/carbon-intelligence/db/postgres.conf:/db/postgres.conf
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U carbon"]
+      test: ["CMD-SHELL", "pg_isready -U carbon -d carbon_intel"]
       interval: 10s
       timeout: 5s
       retries: 5

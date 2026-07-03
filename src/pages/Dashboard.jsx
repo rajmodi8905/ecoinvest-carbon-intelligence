@@ -15,6 +15,10 @@ const Dashboard = () => {
   const [news, setNews] = React.useState([]);
   const [analytics, setAnalytics] = React.useState(null);
   const [lastUpdate, setLastUpdate] = React.useState(null);
+  
+  // Advanced Insights State
+  const [marketAlerts, setMarketAlerts] = React.useState([]);
+  const [sentimentIndex, setSentimentIndex] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   
@@ -699,6 +703,28 @@ const Dashboard = () => {
 
               {/* Middle Column - Main Content */}
               <main className="col-span-1 flex flex-col max-h-[calc(100vh-8rem)]">
+                
+                {/* Advanced Stream Analytics: Market Alerts */}
+                {marketAlerts && marketAlerts.length > 0 && (
+                  <div className="mb-4 space-y-3">
+                    {marketAlerts.map((alert, idx) => (
+                      <div key={idx} className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 flex items-start gap-4 animate-slideIn">
+                        <div className="p-2 bg-red-500/20 rounded-full">
+                          <Activity className="w-5 h-5 text-red-500 animate-pulse" />
+                        </div>
+                        <div>
+                          <h3 className="text-red-500 font-bold text-sm uppercase tracking-wider">
+                            Pathway Market Shock Detected
+                          </h3>
+                          <p className={`text-sm ${theme === "dark" ? "text-slate-300" : "text-gray-700"} mt-1`}>
+                            {alert.message}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Header Section */}
                 <div className="mb-4">
                   <div className="flex items-center justify-between animate-slideIn mb-4">
@@ -732,6 +758,16 @@ const Dashboard = () => {
                             >
                               Live • Updated {lastUpdate}
                             </span>
+                            {sentimentIndex && sentimentIndex.length > 0 && (
+                              <div className="ml-4 flex gap-3 px-3 py-1 bg-green-500/10 rounded-full border border-green-500/20">
+                                <span className="font-semibold text-[10px] uppercase text-green-500 tracking-wider">Market Sentiment:</span>
+                                {sentimentIndex.map((s, idx) => (
+                                  <span key={idx} className={s.sentiment === 'Positive' ? 'text-green-500' : s.sentiment === 'Negative' ? 'text-red-500' : 'text-gray-400'}>
+                                    {s.sentiment === 'Positive' ? '📈' : s.sentiment === 'Negative' ? '📉' : '➖'} {s.count}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

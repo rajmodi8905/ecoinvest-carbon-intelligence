@@ -14,7 +14,7 @@ import pathway as pw
 from pipeline import build_pipeline
 from redis_cache import cache_get, cache_set
 
-unified, finance, news = build_pipeline()
+unified, finance, news, sentiment_index, market_alerts = build_pipeline()
 
 OUTPUT_DIR = "./output"
 PROJECTS_FILE = os.path.join(OUTPUT_DIR, "projects.jsonl")

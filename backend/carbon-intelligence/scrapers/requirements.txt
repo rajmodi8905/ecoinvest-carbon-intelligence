@@ -6,3 +6,4 @@ beautifulsoup4==4.12.2
 python-dotenv
 langchain-ollama==0.2.3
 langchain-core
+python-dateutil

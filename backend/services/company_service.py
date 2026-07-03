@@ -27,6 +27,10 @@ try:
 except ImportError:
     LANGCHAIN_AVAILABLE = False
     logger.warning("⚠️ LangChain or Tavily not installed. Using fallback analysis.")
+    
+    # Dummy decorator for when Langchain is unavailable
+    def tool(func):
+        return func
 
 
 class CompanyService:
