@@ -11,6 +11,7 @@ import {
   Send,
   Award,
   FileText,
+  RefreshCw
 } from "lucide-react";
 import api from "../services/api";
 
@@ -21,6 +22,7 @@ const ReportPage = () => {
   const [company, setCompany] = React.useState(null);
   const [companyInsights, setCompanyInsights] = React.useState(null);
   const [companyFutureImpact, setCompanyFutureImpact] = React.useState(null);
+  const [isGeneratingAI, setIsGeneratingAI] = React.useState(false);
   
   // Project state  
   const [project, setProject] = React.useState(null);
@@ -83,57 +85,23 @@ const ReportPage = () => {
         const companyResult = await api.getCompanyById(id);
         if (companyResult.success) {
           setCompany(companyResult.data);
-
-          // Fetch company insights (Section 2)
-          try {
-            setProgressSteps([{ step: 1, message: 'Fetching company insights...', timestamp: Date.now() }]);
-            setCurrentProgress('Fetching company insights...');
-            const insightsResult = await api.getCompanyInsights(id);
-            if (insightsResult.success) {
-              setCompanyInsights(insightsResult.data);
-              setProgressSteps(prev => [...prev, { step: 2, message: 'Company insights loaded', timestamp: Date.now() }]);
-            }
-          } catch (err) {
-            console.log("Company insights not available:", err);
-          }
-
-          // Fetch future impact (Section 3)
-          try {
-            setCurrentProgress('Analyzing future impact...');
-            setProgressSteps(prev => [...prev, { step: 3, message: 'Analyzing sustainability & future impact...', timestamp: Date.now() }]);
-            const futureResult = await api.getFutureImpactAnalysis(id);
-            if (futureResult.success) {
-              setCompanyFutureImpact(futureResult.data);
-              setProgressSteps(prev => [...prev, { step: 4, message: 'Analysis complete', timestamp: Date.now() }]);
-              setCurrentProgress(null);
-            }
-          } catch (err) {
-            console.log("Future impact not available:", err);
-            setCurrentProgress(null);
-          }
+          
+          // Try to load cached insights silently
+          const cachedInsights = await api.getCompanyInsights(id, false, true);
+          if (cachedInsights.success) setCompanyInsights(cachedInsights.data);
+          const cachedFuture = await api.getFutureImpactAnalysis(id, false, true);
+          if (cachedFuture.success) setCompanyFutureImpact(cachedFuture.data);
+          
         } else {
           // Try as project
           const projectResult = await api.getProjectById(id);
           if (projectResult.success) {
             setProject(projectResult.data);
             
-            // Fetch project report (Section 2)
-            setReportLoading(true);
-            setProgressSteps([{ step: 1, message: 'Generating comprehensive project report...', timestamp: Date.now() }]);
-            setCurrentProgress('Generating comprehensive project report...');
-            try {
-              const reportResult = await api.getProjectReport(id);
-              if (reportResult.success) {
-                setProjectReport(reportResult.data);
-                setProgressSteps(prev => [...prev, { step: 2, message: 'Report generation complete', timestamp: Date.now() }]);
-                setCurrentProgress(null);
-              }
-            } catch (err) {
-              console.log("Project report not available:", err);
-              setCurrentProgress(null);
-            } finally {
-              setReportLoading(false);
-            }
+            // Try to load cached report silently
+            const cachedReport = await api.getProjectReport(id, false, true);
+            if (cachedReport.success) setProjectReport(cachedReport.data);
+            
           } else {
             setError("Not found");
           }
@@ -150,6 +118,47 @@ const ReportPage = () => {
     
     // No cleanup needed since we check id directly
   }, [id]);
+
+  const generateAIInsights = async (forceRefresh = false) => {
+    setIsGeneratingAI(true);
+    setProgressSteps([]);
+    setCurrentProgress(forceRefresh ? 'Forcing new AI analysis...' : 'Initializing AI analysis...');
+    
+    try {
+      if (company) {
+        setProgressSteps([{ step: 1, message: 'Fetching company insights...', timestamp: Date.now() }]);
+        setCurrentProgress('Fetching company insights...');
+        const insightsResult = await api.getCompanyInsights(id, forceRefresh);
+        if (insightsResult.success) {
+          setCompanyInsights(insightsResult.data);
+          setProgressSteps(prev => [...prev, { step: 2, message: 'Company insights loaded', timestamp: Date.now() }]);
+        }
+
+        setCurrentProgress('Analyzing future impact...');
+        setProgressSteps(prev => [...prev, { step: 3, message: 'Analyzing sustainability & future impact...', timestamp: Date.now() }]);
+        const futureResult = await api.getFutureImpactAnalysis(id, forceRefresh);
+        if (futureResult.success) {
+          setCompanyFutureImpact(futureResult.data);
+          setProgressSteps(prev => [...prev, { step: 4, message: 'Analysis complete', timestamp: Date.now() }]);
+        }
+      } else if (project) {
+        setReportLoading(true);
+        setProgressSteps([{ step: 1, message: 'Generating comprehensive project report...', timestamp: Date.now() }]);
+        setCurrentProgress('Generating comprehensive project report...');
+        const reportResult = await api.getProjectReport(id, forceRefresh);
+        if (reportResult.success) {
+          setProjectReport(reportResult.data);
+          setProgressSteps(prev => [...prev, { step: 2, message: 'Report generation complete', timestamp: Date.now() }]);
+        }
+      }
+    } catch (err) {
+      console.error("AI Generation failed:", err);
+    } finally {
+      setIsGeneratingAI(false);
+      setReportLoading(false);
+      setCurrentProgress(null);
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!chatInput.trim() || chatLoading) return;
@@ -333,15 +342,10 @@ const ReportPage = () => {
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm text-slate-500">ESG Rating</p>
-                  <p className="text-2xl font-bold text-green-400">
-                    {company.esg_rating || "N/A"}
-                  </p>
-                </div>
-                <div>
                   <p className="text-sm text-slate-500">GII Score</p>
-                  <p className="text-2xl font-bold text-emerald-400">
-                    {company.gii_score || "N/A"}/100
+                  <p className="text-2xl font-bold text-emerald-400 flex flex-col">
+                    <span>{company.gii_score || "N/A"}/100</span>
+                    <span className="text-xs font-normal text-slate-500 mt-1">Green Investment Index</span>
                   </p>
                 </div>
               </div>
@@ -364,31 +368,53 @@ const ReportPage = () => {
               </div>
             </div>
 
-            {/* SECTION 2: General Insights */}
+            {/* SECTION 2: AI Insights & Summary */}
             <div
               className="bg-gradient-to-br from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 mb-8 border border-green-500/30 animate-slideIn"
               style={{ animationDelay: "0.1s" }}
             >
-              <h2 className="text-2xl font-bold text-green-400 mb-6 flex items-center gap-2">
-                <Sparkles className="w-6 h-6" />
-                General Insights
-              </h2>
-              {companyInsights ? (
-                <div className="prose prose-invert prose-green max-w-none">
-                  <div 
-                    className="text-slate-300 leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: companyInsights.insights || "No insights available." }}
-                  />
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-green-400 flex items-center gap-2">
+                  <Sparkles className="w-6 h-6" />
+                  AI Insights & Summary
+                </h2>
+                <div className="flex items-center gap-4">
+                  {!companyInsights && !companyFutureImpact && !isGeneratingAI && (
+                    <button 
+                      onClick={() => generateAIInsights(false)}
+                      className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-medium py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 transition"
+                    >
+                      <Sparkles className="w-4 h-4" /> Generate AI Insights
+                    </button>
+                  )}
+                  {(companyInsights || companyFutureImpact) && !isGeneratingAI && (
+                    <button 
+                      onClick={() => generateAIInsights(true)}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 transition border border-slate-700"
+                      title="Force refresh AI insights (bypasses cache)"
+                    >
+                      <RefreshCw className="w-4 h-4" /> Force Refresh
+                    </button>
+                  )}
                 </div>
-              ) : (
+              </div>
+              
+              {!companyInsights && !companyFutureImpact && !isGeneratingAI && (
+                <div className="text-center py-8">
+                  <p className="text-slate-400 mb-4">AI insights and future impact analysis are not generated yet.</p>
+                  <p className="text-sm text-slate-500">Click the button above to generate a comprehensive AI summary for this company.</p>
+                </div>
+              )}
+
+              {isGeneratingAI ? (
                 <div className="flex flex-col items-center justify-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto mb-3"></div>
-                  {currentProgress && progressSteps.length > 0 && progressSteps.some(s => s.step <= 2) && (
+                  {currentProgress && (
                     <div className="text-center mt-4">
                       <p className="text-green-400 font-medium mb-2">{currentProgress}</p>
-                      <div className="space-y-1 text-sm text-slate-400">
+                      <div className="space-y-1 text-sm text-slate-400 text-left w-max mx-auto">
                         {progressSteps.map((step, idx) => (
-                          <div key={idx} className="flex items-center gap-2 justify-center">
+                          <div key={idx} className="flex items-center gap-2">
                             <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                             <span>{step.message}</span>
                           </div>
@@ -397,38 +423,29 @@ const ReportPage = () => {
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-
-            {/* SECTION 3: Future Impact */}
-            <div
-              className="bg-gradient-to-br from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 mb-8 border border-purple-500/30 animate-slideIn"
-              style={{ animationDelay: "0.2s" }}
-            >
-              <h2 className="text-2xl font-bold text-purple-400 mb-6 flex items-center gap-2">
-                <TrendingUp className="w-6 h-6" />
-                Sustainability & Future Impact
-              </h2>
-              {companyFutureImpact ? (
-                <div className="prose prose-invert prose-purple max-w-none">
-                  <div 
-                    className="text-slate-300 leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: companyFutureImpact.analysis || "No analysis available." }}
-                  />
-                </div>
               ) : (
-                <div className="flex flex-col items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto mb-3"></div>
-                  {currentProgress && progressSteps.length > 0 && progressSteps.some(s => s.step >= 3) && (
-                    <div className="text-center mt-4">
-                      <p className="text-purple-400 font-medium mb-2">{currentProgress}</p>
-                      <div className="space-y-1 text-sm text-slate-400">
-                        {progressSteps.filter(s => s.step >= 3).map((step, idx) => (
-                          <div key={idx} className="flex items-center gap-2 justify-center">
-                            <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                            <span>{step.message}</span>
-                          </div>
-                        ))}
+                <div className="space-y-8">
+                  {companyInsights && (
+                    <div>
+                      <h3 className="text-xl font-semibold text-emerald-300 mb-4">General Insights</h3>
+                      <div className="prose prose-invert prose-green max-w-none">
+                        <div 
+                          className="text-slate-300 leading-relaxed"
+                          dangerouslySetInnerHTML={{ __html: companyInsights.insights }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {companyFutureImpact && (
+                    <div className="pt-6 border-t border-slate-700/50">
+                      <h3 className="text-xl font-semibold text-purple-400 mb-4 flex items-center gap-2">
+                        <TrendingUp className="w-5 h-5" /> Sustainability & Future Impact
+                      </h3>
+                      <div className="prose prose-invert prose-purple max-w-none">
+                        <div 
+                          className="text-slate-300 leading-relaxed"
+                          dangerouslySetInnerHTML={{ __html: companyFutureImpact.analysis }}
+                        />
                       </div>
                     </div>
                   )}
@@ -526,11 +543,40 @@ const ReportPage = () => {
               className="bg-gradient-to-br from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 mb-8 border border-green-500/30 animate-slideIn"
               style={{ animationDelay: "0.1s" }}
             >
-              <h2 className="text-2xl font-bold text-green-400 mb-6 flex items-center gap-2">
-                <FileText className="w-6 h-6" />
-                Comprehensive Project Report
-              </h2>
-              {reportLoading ? (
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-green-400 flex items-center gap-2">
+                  <FileText className="w-6 h-6" />
+                  Comprehensive Project Report
+                </h2>
+                <div className="flex items-center gap-4">
+                  {!projectReport && !isGeneratingAI && (
+                    <button 
+                      onClick={() => generateAIInsights(false)}
+                      className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-medium py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 transition"
+                    >
+                      <Sparkles className="w-4 h-4" /> Generate AI Report
+                    </button>
+                  )}
+                  {projectReport && !isGeneratingAI && (
+                    <button 
+                      onClick={() => generateAIInsights(true)}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 transition border border-slate-700"
+                      title="Force refresh AI report (bypasses cache)"
+                    >
+                      <RefreshCw className="w-4 h-4" /> Force Refresh
+                    </button>
+                  )}
+                </div>
+              </div>
+              
+              {!projectReport && !isGeneratingAI && (
+                <div className="text-center py-8">
+                  <p className="text-slate-400 mb-4">The comprehensive AI report is not generated yet.</p>
+                  <p className="text-sm text-slate-500">Click the button above to generate a detailed report for this project.</p>
+                </div>
+              )}
+
+              {isGeneratingAI || reportLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="text-center max-w-lg mx-auto">
                     {/* Spinner */}
@@ -552,7 +598,7 @@ const ReportPage = () => {
                     
                     {/* Progress Steps */}
                     {progressSteps.length > 0 && (
-                      <div className="space-y-2 text-left">
+                      <div className="space-y-2 text-left w-max mx-auto">
                         <h3 className="text-sm font-semibold text-slate-300 mb-3 text-center">Progress:</h3>
                         {progressSteps.map((step, idx) => (
                           <div 
@@ -590,11 +636,7 @@ const ReportPage = () => {
                     dangerouslySetInnerHTML={{ __html: projectReport.report || "No report available." }}
                   />
                 </div>
-              ) : (
-                <p className="text-slate-400 text-center py-8">
-                  Report not available
-                </p>
-              )}
+              ) : null}
             </div>
           </>
         )}

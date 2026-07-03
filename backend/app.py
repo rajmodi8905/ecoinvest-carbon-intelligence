@@ -96,11 +96,12 @@ set_project_service(project_report_service)
 set_projects_service(projects_service)
 set_live_news_service(live_news_service)
 
-# Initialize RAG services at startup
-if RAG_AVAILABLE:
-    logger.info("📚 Initializing RAG services...")
+# Initialize RAG services in background so server starts immediately
+def _init_rag_services():
+    """Background thread to initialize RAG vector stores."""
+    logger.info("📚 Initializing RAG services in background...")
     print("\n" + "="*70)
-    print("📚 INITIALIZING RAG VECTOR STORES")
+    print("📚 INITIALIZING RAG VECTOR STORES (background)")
     print("="*70)
     
     # Initialize News RAG
@@ -122,6 +123,11 @@ if RAG_AVAILABLE:
     print("="*70)
     print("✅ RAG SERVICES READY")
     print("="*70 + "\n")
+
+if RAG_AVAILABLE:
+    import threading
+    rag_thread = threading.Thread(target=_init_rag_services, daemon=True)
+    rag_thread.start()
 else:
     logger.warning("⚠️ RAG Services not available - install langchain-community, faiss-cpu, sentence-transformers")
 
@@ -309,7 +315,9 @@ def get_project_details(project_id):
 @app.route('/api/project/<project_id>/report', methods=['GET'])
 def get_project_report(project_id):
     """Section 2: Generate project report - calls ProjectReportService"""
-    result = project_report_service.generate_project_report(project_id)
+    force_refresh = request.args.get('forceRefresh', 'false').lower() == 'true'
+    only_cached = request.args.get('onlyCached', 'false').lower() == 'true'
+    result = project_report_service.generate_project_report(project_id, force_refresh, only_cached)
     return jsonify(result)
 
 @app.route('/api/project/<project_id>/custom-query', methods=['POST'])
@@ -404,13 +412,17 @@ def get_company_details(ticker):
 @app.route('/api/company/<ticker>/insights', methods=['GET'])
 def get_company_insights(ticker):
     """Get general company insights - calls CompanyService"""
-    result = company_service.get_company_insights(ticker)
+    force_refresh = request.args.get('forceRefresh', 'false').lower() == 'true'
+    only_cached = request.args.get('onlyCached', 'false').lower() == 'true'
+    result = company_service.get_company_insights(ticker, force_refresh, only_cached)
     return jsonify(result)
 
 @app.route('/api/company/<ticker>/future-impact', methods=['GET'])
 def get_future_impact_analysis(ticker):
     """Get sustainability and future impact analysis - calls CompanyService"""
-    result = company_service.get_future_impact_analysis(ticker)
+    force_refresh = request.args.get('forceRefresh', 'false').lower() == 'true'
+    only_cached = request.args.get('onlyCached', 'false').lower() == 'true'
+    result = company_service.get_future_impact_analysis(ticker, force_refresh, only_cached)
     return jsonify(result)
 
 @app.route('/api/company/<ticker>/custom-query', methods=['POST'])

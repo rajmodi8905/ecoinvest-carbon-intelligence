@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 # Vector store and embeddings
 LANGCHAIN_AVAILABLE = False
@@ -30,6 +30,7 @@ try:
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     print("⚠️ LangChain packages not available. Install with: pip install langchain-community faiss-cpu sentence-transformers")
+    Document = Any
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +103,21 @@ class ProjectsRAGService:
         print("📋 Loading indexed project IDs...")
         self._load_indexed_ids()
         
+        self._ready = False  # Flag to indicate if vector store is ready
+        
         print("🔍 Checking for existing vector store...")
-        self._initialize_vector_store()
+        faiss_index_path = self.vector_store_path / "index.faiss"
+        
+        if faiss_index_path.exists():
+            # Existing store found - load synchronously (fast)
+            self._initialize_vector_store()
+        else:
+            # No existing store - build in background thread so server can start
+            print("   No existing vector store found - will build in background")
+            print("   ⚡ Server will start immediately. RAG search available after build completes.")
+            build_thread = threading.Thread(target=self._initialize_vector_store, daemon=True)
+            build_thread.start()
+        
         print("=" * 70 + "\n")
     
     # ============================================================================
@@ -240,6 +254,7 @@ class ProjectsRAGService:
                 )
                 print(f"   ✓ Vector store loaded successfully")
                 logger.info("✅ Vector store loaded")
+                self._ready = True
                 # Check for new projects and add them incrementally
                 print("🔄 Checking for new projects...")
                 self._add_new_projects()
@@ -275,7 +290,13 @@ class ProjectsRAGService:
             if not projects:
                 logger.warning("⚠️ No projects to index")
                 return
-            print(f"   ✓ Loaded {len(projects)} projects")
+            # Limit to 3000 projects to keep embedding time reasonable
+            MAX_PROJECTS = 3000
+            if len(projects) > MAX_PROJECTS:
+                print(f"   ✓ Loaded {len(projects)} projects, limiting to {MAX_PROJECTS} for RAG")
+                projects = projects[:MAX_PROJECTS]
+            else:
+                print(f"   ✓ Loaded {len(projects)} projects")
             
             print(f"📝 Step 2/5: Creating document chunks...")
             documents = self._create_documents(projects)
@@ -307,6 +328,7 @@ class ProjectsRAGService:
             print(f"✅ VECTOR STORE READY: {len(documents)} chunks from {len(projects)} projects")
             print("=" * 70)
             logger.info(f"✅ Initial vector store built with {len(documents)} chunks from {len(projects)} projects")
+            self._ready = True
     
     def _add_new_projects(self):
         """Add only new projects to existing vector store (incremental update)."""

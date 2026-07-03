@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.DS_Store
+backend/**/__pycache__
+backend/**/*.pyc
+backend/**/.pytest_cache
+backend/carbon-intelligence/server/output
+backend/carbon-intelligence/server/*.pyc
+backend/carbon-intelligence/server/__pycache__
+backend/carbon-intelligence/scrapers/__pycache__

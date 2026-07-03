@@ -11,10 +11,12 @@ import logging
 from typing import Dict, Any, Optional
 from llm_manager import get_llm
 import markdown
+from .db_cache import get_cached_insight, set_cached_insight
 
 # Try to import LangChain components for agent-based custom_query
 try:
     from langgraph.prebuilt import create_react_agent
+
     from langchain_core.messages import HumanMessage
     from langgraph.checkpoint.memory import MemorySaver
     LANGCHAIN_AVAILABLE = True
@@ -87,7 +89,7 @@ class ProjectReportService:
             logger.error(f"Error getting project details for {project_id}: {e}")
             return {'success': False, 'error': str(e)}
     
-    def generate_project_report(self, project_id: str) -> Dict[str, Any]:
+    def generate_project_report(self, project_id: str, force_refresh: bool = False, only_cached: bool = False) -> Dict[str, Any]:
         """
         Section 2: Generate AI-powered comprehensive report
         
@@ -105,6 +107,25 @@ class ProjectReportService:
             
             project = project_result['data']
             
+            # Check cache
+            if not force_refresh:
+                cached = get_cached_insight('project', project_id, 'report', expiry_hours=12)
+                if cached:
+                    return {
+                        'success': True,
+                        'data': {
+                            'report': cached,
+                            'generated': True
+                        }
+                    }
+            
+            if only_cached:
+                return {
+                    'success': False,
+                    'error': 'No cached report found',
+                    'cached_only': True
+                }
+            
             # Generate AI-powered report using centralized LLM
             ai_report = None
             llm = get_llm()
@@ -118,6 +139,9 @@ class ProjectReportService:
                     # Convert markdown to HTML for proper formatting
                     ai_report = markdown.markdown(ai_report_markdown, extensions=['nl2br', 'sane_lists'])
                     logger.info(f"✅ AI report generated for {project_id}")
+                    
+                    # Save to cache
+                    set_cached_insight('project', project_id, 'report', ai_report)
                 except Exception as e:
                     logger.error(f"LLM error for {project_id}: {e}")
                     ai_report = f"Report generation temporarily unavailable. Please try again later.\n\nError: {str(e)}"
@@ -165,7 +189,10 @@ class ProjectReportService:
                     # MemorySaver provides thread-local conversation persistence
                     checkpointer = MemorySaver()
                     
-                    # Create agent with memory
+                    # MemorySaver provides thread-local conversation persistence
+                    checkpointer = MemorySaver()
+                    
+                    # Create agent with memory and trimming
                     project_context = f"""Project Information:
 - Name: {project.get('project_name', 'Unknown')}
 - ID: {project.get('project_id', 'N/A')}
@@ -179,17 +206,18 @@ class ProjectReportService:
 - Description: {project.get('description', 'No description available')}"""
                     
                     agent = create_react_agent(
-                        llm,
+                        model=llm,
                         tools=[],
-                        prompt=f"""You are an expert on carbon credit projects analyzing {project.get('project_name', 'this project')} ({project_id}).
+                        state_modifier=f"""You are an expert on carbon credit projects analyzing {project.get('project_name', 'this project')} ({project_id}).
 
 CURRENT PROJECT CONTEXT:
 {project_context}
 
 Answer questions about THIS PROJECT clearly and accurately. All questions are about {project.get('project_name', 'this project')} unless stated otherwise.
 
-Provide clear, concise answers based on the project data. If the question cannot be answered with available data, say so clearly. You have conversation memory and can reference previous questions.""",
-                        checkpointer=checkpointer
+If asked to compare, explain its specific strengths. Do not hallucinate data.
+
+User's Question: {query}"""
                     )
                     
                     # Use thread_id for conversation memory per project

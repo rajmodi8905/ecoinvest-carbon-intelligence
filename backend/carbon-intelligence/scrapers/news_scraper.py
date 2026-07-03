@@ -10,7 +10,7 @@ import dateutil.parser
 import feedparser
 import psycopg2
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -23,30 +23,22 @@ else:
     print(f"⚠️ .env file not found at {backend_env_path}")
 
 # Initialize Gemini model for sentiment analysis
-def get_gemini_model():
-    """Initialize and return Gemini model"""
-    # Check if API key is available
-    api_key = os.getenv('GOOGLE_API_KEY')
-    if not api_key:
-        print("⚠️ Warning: GOOGLE_API_KEY not found in environment variables")
-        print("⚠️ Falling back to keyword-based sentiment analysis")
-        return None
-    
+
+def get_ollama_model():
+    '''Initialize and return Ollama model'''
     try:
-        return ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",  # Using the correct model name
-            temperature=0.5,  # Increased for more opinionated responses
-            convert_system_message_to_human=False,  # Updated to avoid deprecation warning
-            google_api_key=api_key
+        return ChatOllama(
+            model="qwen2.5",
+            base_url="http://host.docker.internal:11434",
+            temperature=0.5,
         )
     except Exception as e:
-        print(f"⚠️ Warning: Failed to initialize Gemini model: {e}")
-        print("⚠️ Falling back to keyword-based sentiment analysis")
+        print(f"⚠️ Warning: Failed to initialize Ollama model: {e}")
         return None
 
 # Create sentiment analysis chain
 def create_sentiment_chain(llm):
-    """Create the sentiment analysis chain using Gemini"""
+    '''Create the sentiment analysis chain using Ollama'''
     if llm is None:
         return None
     
@@ -84,7 +76,7 @@ Respond with EXACTLY ONE WORD: Positive, Negative, or Neutral
     return prompt | llm | StrOutputParser()
 
 # Initialize global sentiment chain
-_llm = get_gemini_model()
+_llm = get_ollama_model()
 _sentiment_chain = create_sentiment_chain(_llm) if _llm else None
 
 # Sentiment keywords (fallback for when Gemini is unavailable)
@@ -132,13 +124,33 @@ def analyze_sentiment_fallback(title, summary):
         return "Neutral"
 
 def analyze_sentiment(title, summary):
-    """Random sentiment analysis to save API quota"""
-    import random
-    import time
-    sentiment = random.choice(["Positive", "Negative", "Neutral"])
-    
-    # Mimic LLM API latency (increased as requested)
-    time.sleep(random.uniform(2.0, 5.0))
+    '''Ollama-based sentiment analysis with fallback'''
+    # Try using Ollama first
+    if _sentiment_chain is not None:
+        try:
+            result = _sentiment_chain.invoke({
+                "title": title,
+                "summary": summary
+            })
+            # Clean and validate the result
+            sentiment = result.strip()
+            # Handle various response formats
+            if sentiment.lower().startswith('positive'):
+                sentiment = "Positive"
+            elif sentiment.lower().startswith('negative'):
+                sentiment = "Negative"
+            elif sentiment.lower().startswith('neutral'):
+                sentiment = "Neutral"
+            else:
+                sentiment = sentiment.capitalize()
+            
+            if sentiment in ["Positive", "Negative", "Neutral"]:
+                print(f"🧠 Ollama: '{title[:50]}...' → {sentiment}")
+                return sentiment
+            else:
+                print(f"⚠️ Unexpected Ollama response: '{result}' for: {title[:50]}")
+        except Exception as e:
+            print(f"⚠️ Ollama error for '{title[:50]}...': {e}")
     
     print(f"🎲 Random Sentiment: '{title[:50]}...' → {sentiment}")
     return sentiment
@@ -304,18 +316,14 @@ def run_news_scraper(keywords=None, companies=None, conn=None):
     if news_api_key:
         print("🌐 Fetching from NewsAPI...")
         newsapi_articles = fetch_from_newsapi(news_api_key)
+        
+        
+        articles_processed = 0
+        for article in newsapi_articles:
+            if articles_processed >= 5:
+                break
+            articles_processed += 1
 
-    # NORMALIZE AND DEDUPLICATE ALL ARTICLES IN MEMORY
-    normalized_articles = {}
-    
-    for article in newsapi_articles:
-        try:
-            guid = hashlib.md5(article['url'].encode()).hexdigest()
-            news_id = f"news_{guid[:8]}"
-            title = article.get('title', 'Untitled')
-            link = article['url']
-            
-            raw_published = article.get('publishedAt', datetime.now().isoformat())
             try:
                 published = dateutil.parser.parse(raw_published).isoformat()
             except Exception:
@@ -393,15 +401,41 @@ def run_news_scraper(keywords=None, companies=None, conn=None):
     
     print(f"📊 Total fetched: {len(normalized_articles)} | Already in DB: {len(existing_ids)} | New to insert: {len(new_articles_list)}")
 
-    if new_articles_list:
-        # ADD SENTIMENT TO NEW ARTICLES CONCURRENTLY
-        records_to_insert = []
-        
-        def process_article(art):
-            sentiment = analyze_sentiment(art['title'], art['summary'])
             
-            if not art['image_url']:
-                image_colors = {"Positive": "4CAF50", "Negative": "FF5722", "Neutral": "FF9800"}
+            for entry in feed.entries:
+                if articles_processed >= 10:
+                    break
+                articles_processed += 1
+
+                guid = hashlib.md5(entry.link.encode()).hexdigest()
+                news_id = f"news_{guid[:8]}"
+
+                title = entry.title
+                link = entry.link
+                published = entry.get("published", time.strftime("%Y-%m-%dT%H:%M:%SZ"))
+                source = entry.get("source", {}).get("title", "Unknown")
+                summary = entry.get("summary", title)[:300]
+                
+                # Generate body
+                body = generate_news_body(title, entry.get("summary", ""))
+                
+                # Determine author
+                author = entry.get("author", "Staff Writer")
+                if not author or author == "Unknown":
+                    # Generate realistic author names
+                    authors = ["Sarah Chen", "David Martinez", "Elena Rodriguez", "James Thompson", 
+                              "Priya Sharma", "Michael O'Brien", "Lisa Anderson", "Ahmed Hassan"]
+                    author = random.choice(authors)
+                
+                # Analyze sentiment
+                sentiment = analyze_sentiment(title, summary)
+                
+                # Generate placeholder image based on sentiment
+                image_colors = {
+                    "Positive": "4CAF50",
+                    "Negative": "FF5722",
+                    "Neutral": "FF9800"
+                }
                 color = image_colors.get(sentiment, "808080")
                 art['image_url'] = f"https://via.placeholder.com/800x450/{color}/FFFFFF?text=Carbon+News"
 
@@ -440,7 +474,7 @@ def run_news_scraper(keywords=None, companies=None, conn=None):
 
 if __name__ == "__main__":
     print("🚀 Starting News Scraper...")
-    print(f"📊 Gemini Model: {'✅ Enabled' if _llm else '❌ Disabled (using fallback)'}")
+    print(f"📊 Ollama Model: {'✅ Enabled' if _llm else '❌ Disabled (using fallback)'}")
     
     try:
         # Run the scraper with empty keywords and companies (RSS feeds don't use them)

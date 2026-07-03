@@ -23,27 +23,6 @@ pandas==2.0.3
 requests>=2.32.3
 python-dateutil==2.8.2
 
-# AI/LLM for Report Generation and Chatbot
-langchain
-langchain-core
-langchain-google-genai
-langchain-ollama
-langchain-community
-google-generativeai
-langchain-huggingface
-
-# LangGraph for Agent Workflows
-langgraph
-
-# Tavily Search Tool
-tavily-python>=0.5.0
-langchain-tavily>=0.2.0
-
-# Vector Store and Embeddings for RAG
-faiss-cpu>=1.7.4
-sentence-transformers>=2.2.2
-langchain-text-splitters>=0.3.0
-
 # Text Processing
 feedparser>=6.0.10
 beautifulsoup4>=4.12.0
@@ -54,3 +33,13 @@ redis>=5.0.0
 yfinance>=0.2.0
 grpcio>=1.60.0
 grpcio-tools>=1.60.0
+
+# AI and LLM Dependencies
+langchain
+langchain-community
+langchain-google-genai
+langgraph
+langchain-tavily
+sentence-transformers
+faiss-cpu
+langchain-ollama

@@ -22,12 +22,8 @@ A full-stack ESG and carbon market intelligence platform with real-time data scr
 ### One-Command Startup
 
 ```bash
-# Start entire backend infrastructure
+# Start entire infrastructure (frontend, backend, databases, etc.)
 docker-compose up -d --build
-
-# Start frontend (in a new terminal)
-npm install
-npm run dev
 ```
 
 That's it! Everything starts together:
@@ -74,7 +70,7 @@ Frontend will be available at: http://localhost:5173
 
 ### AI Chatbot (`/api/chat`)
 
-Powered by **Google Gemini 2.0 Flash** with LangChain v1 agents:
+Powered by **Ollama (qwen2.5)** with LangChain v1 agents:
 
 **Capabilities:**
 - 🔍 **RAG Search** - News & carbon projects vector search
@@ -101,7 +97,7 @@ Powered by **Google Gemini 2.0 Flash** with LangChain v1 agents:
 ### Company Reports (`/api/company/:ticker`)
 
 - **Basic Details** - Stock price, ESG rating, GII score
-- **AI Insights** - Sustainability analysis powered by Gemini
+- **AI Insights** - Sustainability analysis powered by local LLM (Qwen) with PostgreSQL caching for instant reloads.
 - **Future Impact Analysis** - Multi-agent system using:
   - News RAG search
   - Projects RAG search  
@@ -152,35 +148,22 @@ npm run build
 
 ### Environment Variables
 
-Create `.env` file in project root:
+Create a `.env` file in the project root:
 
 ```env
-# Backend API
+# Frontend Config
 VITE_API_URL=http://localhost:5001
 VITE_WS_URL=http://localhost:5001
-```
 
-Backend `.env` at `backend/.env`:
-
-```env
-# Flask Configuration
-FLASK_ENV=development
-FLASK_PORT=5000
-
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=carbon_intel
-DB_USER=carbon
-DB_PASSWORD=carbonpw
-
-# AI/LLM (REQUIRED)
+# AI/LLM (Optional) - Docker Compose uses local Ollama by default
 GOOGLE_API_KEY=your_gemini_api_key_here
 TAVILY_API_KEY=your_tavily_api_key_here
 
 # Optional
 NEWS_API_KEY=your_newsapi_key_here
 ```
+
+(Note: If you run the backend locally without Docker, you should also have these in `backend/.env`)
 
 **Get API Keys:**
 - Google Gemini: https://makersuite.google.com/app/apikey
@@ -207,7 +190,8 @@ NEWS_API_KEY=your_newsapi_key_here
 
 ### AI/LLM Stack
 
-- **Google Gemini 2.0 Flash** - Primary LLM
+- **Ollama (qwen2.5)** - Primary LLM (Local)
+- **Google Gemini 2.0 Flash** - Alternative LLM via GOOGLE_API_KEY
 - **LangChain v1** - Agent framework
 - **LangGraph** - Agent orchestration with memory
 - **Tavily** - Web search tool

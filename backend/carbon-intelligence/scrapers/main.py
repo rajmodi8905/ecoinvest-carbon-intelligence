@@ -3,61 +3,39 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import psycopg2
+import os
 from finance_scraper import run_finance_scraper
 from news_scraper import run_news_scraper
 from verra_scraper import run_verra_scraper
 
 print("🔥 Scraper service started")
 
+# Top 20 famous stocks/ETFs
 COMPANIES = [
-    "KRBN",   
-    "KCCA",   
-    "GRN",    
-    "CLNE",   
-    "ENPH",   
-    "PLUG",   
-    "FCEL",   
-    "BLNK",   
-    "CHPT",   
-    "CWEN",   
-    "NEE",    
-    "AY",     
-    "RUN",    
-    "SEDG",   
     "TSLA",   
     "MSFT",   
     "GOOGL",  
     "AAPL",   
     "AMZN",   
+    "ENPH",   
+    "PLUG",   
+    "FCEL",   
+    "BLNK",   
+    "CHPT",   
+    "NEE",    
+    "RUN",    
+    "SEDG",   
     "ORSTED", 
     "EQNR",   
-    "IBE",    
-    "DNNGY",  
-    "VST",    
-    "AES",    
-    "D",      
-    "DUK",    
-    "SO",     
     "ICLN",   
     "TAN",    
     "QCLN",   
-    "PBW",    
-    "ALB",    
-    "SQM",    
-    "MP",     
-    "LAC",    
-    "WM",     
-    "RSG",    
-    "WCN",    
-    "BEPC",   
-    "BEP",    
-    "HASI",
-    "RELIANCE.NS",
-    "TCS.NS",
-    "TATAPOWER.NS",
-    "ADANIGREEN.NS",
-    "JSWENERGY.NS"
+    "KRBN",
+    "BEPC",
 ]
+
+# Configurable scrape interval (in seconds)
+SCRAPE_INTERVAL_SECONDS = int(os.getenv("SCRAPE_INTERVAL_SECONDS", 30))
 
 CARBON_KEYWORDS = [
     "carbon credits",
@@ -112,7 +90,11 @@ def run_continuous_scraper(scraper_name, scraper_func, interval_seconds, *args):
         except Exception as e:
             print(f"❌ [ERROR] {scraper_name} scraper failed: {e}. Sleeping for {interval_seconds}s...")
         
-        time.sleep(interval_seconds)
+        print("\n" + "="*60)
+        print(f"✨ Scraper cycle complete: {completed}/3 successful")
+        print(f"⏳ Sleeping for {SCRAPE_INTERVAL_SECONDS} seconds...")
+        print("="*60 + "\n")
+        time.sleep(SCRAPE_INTERVAL_SECONDS)
 
 if __name__ == "__main__":
     print("\n" + "="*60)

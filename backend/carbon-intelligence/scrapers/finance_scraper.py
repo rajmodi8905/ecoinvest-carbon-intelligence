@@ -7,7 +7,51 @@ import psycopg2
 import time
 import random
 import requests
+import re
 from datetime import datetime
+
+from langchain_ollama import ChatOllama
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+# Dictionary to store cached GII scores: { 'TICKER': {'score': 85, 'timestamp': 160000000} }
+GII_CACHE = {}
+GII_CACHE_DURATION = 10 * 60 * 60  # 10 hours in seconds
+
+def get_ollama_model():
+    '''Initialize and return Ollama model'''
+    try:
+        return ChatOllama(
+            model="qwen2.5",
+            base_url="http://host.docker.internal:11434",
+            temperature=0.2,
+        )
+    except Exception as e:
+        print(f"⚠️ Warning: Failed to initialize Ollama model: {e}")
+        return None
+
+def create_gii_chain(llm):
+    '''Create the GII calculation chain using Ollama'''
+    if llm is None:
+        return None
+    
+    system_instructions = """
+You are a financial and sustainability expert. 
+Calculate the GII (Green Investment Index) score (0-100) for the given company.
+The GII score is designed to quantify a company's financial performance with respect to its sustainability efforts.
+You should evaluate based on the company's industry, known green initiatives, and their general market reputation for sustainability.
+
+Respond ONLY with a single integer between 0 and 100. Do not provide any explanation or extra text.
+"""
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_instructions),
+        ("human", "Calculate the GII score for {company_name} ({ticker}) in the {industry} industry.")
+    ])
+    
+    return prompt | llm | StrOutputParser()
+
+_llm = get_ollama_model()
+_gii_chain = create_gii_chain(_llm)
 
 # Multiple free finance APIs (no API key needed)
 APIS = {
@@ -194,11 +238,65 @@ def fetch_stock_data(ticker):
     print(f"❌ {ticker}: All APIs failed")
     return None
 
-def store_finance_data_batch(cursor, finance_records):
-    """Store multiple finance records using execute_values"""
-    from psycopg2.extras import execute_values
+def get_gii_score(ticker, company_name, industry, change_pct):
+    current_time = time.time()
     
-    insert_query = """
+    # Check cache
+    if ticker in GII_CACHE:
+        cached_data = GII_CACHE[ticker]
+        if current_time - cached_data['timestamp'] < GII_CACHE_DURATION:
+            return cached_data['score']
+            
+    # Calculate using AI
+    if _gii_chain is not None:
+        try:
+            print(f"🧠 Calculating AI GII score for {ticker}...")
+            result = _gii_chain.invoke({
+                "company_name": company_name,
+                "ticker": ticker,
+                "industry": industry
+            })
+            
+            # Extract number
+            try:
+                numbers = re.findall(r'\d+', result)
+                if numbers:
+                    score = min(100, max(0, int(numbers[0])))
+                else:
+                    score = max(0, min(100, 50 + change_pct * 2))
+            except ValueError:
+                score = max(0, min(100, 50 + change_pct * 2))
+                
+            # Update cache
+            GII_CACHE[ticker] = {
+                'score': score,
+                'timestamp': current_time
+            }
+            print(f"   🤖 AI GII Score: {score}")
+            return score
+        except Exception as e:
+            print(f"⚠️ GII LLM error for {ticker}: {e}")
+            
+    # Fallback
+    return max(0, min(100, 50 + change_pct * 2))
+
+def store_finance_data(cursor, ticker, price_data, esg_data=None):
+    """Store finance data in database"""
+    info = COMPANY_INFO.get(ticker, {})
+    company_name = info.get('name', ticker)
+    industry = info.get('industry', 'Technology')
+    
+    # Calculate GII score using AI (with cache)
+    change_pct = price_data['change_percent']
+    gii_score = get_gii_score(ticker, company_name, industry, change_pct)
+    
+    # ESG is being phased out, but keeping for DB schema compatibility
+    if esg_data and esg_data.get('esg_rating'):
+        esg_rating = esg_data['esg_rating']
+    else:
+        esg_rating = 'B'
+    
+    cursor.execute("""
         INSERT INTO finance (
             ticker, company_name, price, stock_price, change_percent,
             industry, description, gii_score, sustainability_update,
@@ -212,9 +310,20 @@ def store_finance_data_batch(cursor, finance_records):
             esg_rating = EXCLUDED.esg_rating,
             market_cap = EXCLUDED.market_cap,
             updated_at = CURRENT_TIMESTAMP
-    """
-    
-    execute_values(cursor, insert_query, finance_records, page_size=100)
+    """, (
+        ticker,
+        company_name,
+        price_data['price'],
+        price_data['price'],  # Populate stock_price with the same value
+        price_data['change_percent'],
+        info.get('industry', 'Technology'),
+        info.get('description', f'{ticker} company'),
+        gii_score,
+        f"Recent sustainability initiatives for {ticker}",
+        esg_rating,
+        info.get('website', f'https://www.{ticker.lower()}.com'),
+        info.get('market_cap', 'N/A')
+    ))
 
 def run_finance_scraper(conn=None, tickers=None):
     """Main scraper function - called by main.py"""
