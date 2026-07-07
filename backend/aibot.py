@@ -738,19 +738,17 @@ def chat():
             )
             bot_response = extract_response(result)
         
-        # Format HTML
-        bot_response_html = markdown.markdown(bot_response, extensions=['nl2br', 'sane_lists'])
-        
+        # Do not convert to HTML, frontend uses ReactMarkdown
         if session_id not in chat_histories:
             chat_histories[session_id] = []
         chat_histories[session_id].extend([
             {"role": "user", "content": user_message},
-            {"role": "assistant", "content": bot_response_html}
+            {"role": "assistant", "content": bot_response}
         ])
         if len(chat_histories[session_id]) > 20:
             chat_histories[session_id] = chat_histories[session_id][-20:]
             
-        return jsonify({'success': True, 'response': bot_response_html}), 200
+        return jsonify({'success': True, 'response': bot_response}), 200
         
     except Exception as e:
         logger.error(f"❌ Error: {str(e)}")

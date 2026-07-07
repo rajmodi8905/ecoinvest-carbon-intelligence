@@ -18,6 +18,7 @@ from datetime import datetime
 import threading
 import time
 import logging
+import yfinance as yf
 
 from pathway_reader import PathwayDataReader
 from services.live_news_service import LiveNewsService
@@ -141,6 +142,13 @@ def handle_connect():
         'message': 'Connected to Carbon Intelligence Backend'
     })
 
+@socketio.on('ping')
+def handle_ping():
+    """Simple ping-pong for frontend latency measurement."""
+    # Socket.io automatically acknowledges if we return something, or we can just emit back.
+    # Emitting explicitly is the easiest way without relying on callback signatures.
+    return "pong"
+
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle WebSocket disconnection"""
@@ -224,6 +232,59 @@ def health_check():
             'company': 'operational'
         },
         'timestamp': datetime.now().isoformat()
+    })
+
+# In-memory cache for yfinance history to prevent rate limiting
+yfinance_cache = {}
+
+@app.route('/api/company/<ticker>/history', methods=['GET'])
+def company_history(ticker):
+    """Fetch 1-day intraday history for a given ticker."""
+    now = time.time()
+    # Cache for 5 minutes (300 seconds)
+    if ticker in yfinance_cache and now - yfinance_cache[ticker]['time'] < 300:
+        return jsonify(yfinance_cache[ticker]['data'])
+
+    try:
+        stock = yf.Ticker(ticker)
+        # 1-day history at 5-minute intervals
+        hist = stock.history(period="1d", interval="5m")
+        if hist.empty:
+            return jsonify({'success': False, 'message': 'No data found'})
+
+        # Extract only the Close prices
+        prices = hist['Close'].tolist()
+        
+        result = {'success': True, 'prices': prices}
+        yfinance_cache[ticker] = {'time': now, 'data': result}
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error fetching yfinance history for {ticker}: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/status', methods=['GET'])
+def api_status():
+    """AI configuration status endpoint for frontend chat UI"""
+    # Try to dynamically fetch from llm_manager if possible, else default to Ollama config
+    try:
+        from llm_manager import get_llm
+        # If it doesn't crash, we have an LLM configured. We'll check env vars for active provider.
+        if os.getenv("GOOGLE_API_KEY"):
+            provider = "gemini"
+            model = "gemini-1.5-pro"
+        else:
+            provider = "ollama"
+            model = os.getenv('OLLAMA_MODEL', 'qwen2.5')
+    except ImportError:
+        provider = "ollama"
+        model = os.getenv('OLLAMA_MODEL', 'qwen2.5')
+        
+    return jsonify({
+        'success': True,
+        'ai_config': {
+            'provider': provider,
+            'llm_model': model
+        }
     })
 
 @app.route('/api/search/fast', methods=['GET'])
@@ -481,7 +542,108 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEW ANALYTICS ENDPOINTS (Bloomberg Terminal UI)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route('/api/analytics/macro-themes', methods=['GET'])
+def get_macro_themes():
+    """Macro theme groups from news stream with velocity + confidence signals."""
+    try:
+        result = analytics_service.get_macro_themes()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in macro-themes: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/analytics/credit-index', methods=['GET'])
+def get_credit_index():
+    """Carbon Credit Index — category-level benchmark from Verra + Carbonmark."""
+    try:
+        result = analytics_service.get_credit_index()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in credit-index: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/analytics/top-movers', methods=['GET'])
+def get_top_movers():
+    """All companies enriched with live news signals: risk, velocity, confidence."""
+    try:
+        result = analytics_service.get_top_movers()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in top-movers: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SSE STREAMING ENDPOINTS (Multi-agent reasoning trace)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _sse_stream(generator_fn, *args):
+    """Wrap a generator function as an SSE response."""
+    import json
+
+    def generate():
+        try:
+            for event in generator_fn(*args):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'step': 'error', 'message': str(e)})}\n\n"
+        finally:
+            yield f"data: {json.dumps({'step': 'done'})}\n\n"
+
+    from flask import Response
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no',
+                             'Access-Control-Allow-Origin': '*'})
+
+
+@app.route('/api/company/<ticker>/report/stream', methods=['GET'])
+def stream_company_report(ticker):
+    """SSE endpoint: streams multi-agent company research report generation steps."""
+    try:
+        from services.multi_agent_service import MultiAgentReportService
+        service = MultiAgentReportService(pathway_reader, company_service, analytics_service)
+        return _sse_stream(service.run_company_report, ticker)
+    except ImportError:
+        # Graceful fallback if multi_agent_service not yet available
+        import json
+        from flask import Response
+        def fallback():
+            yield f"data: {json.dumps({'step': 'error', 'message': 'Multi-agent service not available'})}\n\n"
+            yield f"data: {json.dumps({'step': 'done'})}\n\n"
+        return Response(fallback(), mimetype='text/event-stream')
+    except Exception as e:
+        logger.error(f"SSE company report error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/project/<project_id>/report/stream', methods=['GET'])
+def stream_project_report(project_id):
+    """SSE endpoint: streams multi-agent project research report generation steps."""
+    try:
+        from services.multi_agent_service import MultiAgentReportService
+        service = MultiAgentReportService(pathway_reader, company_service, analytics_service)
+        return _sse_stream(service.run_project_report, project_id)
+    except ImportError:
+        import json
+        from flask import Response
+        def fallback():
+            yield f"data: {json.dumps({'step': 'error', 'message': 'Multi-agent service not available'})}\n\n"
+            yield f"data: {json.dumps({'step': 'done'})}\n\n"
+        return Response(fallback(), mimetype='text/event-stream')
+    except Exception as e:
+        logger.error(f"SSE project report error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
+
     port = int(os.getenv('PORT', 5001))
     debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     

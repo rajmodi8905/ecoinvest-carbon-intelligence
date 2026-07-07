@@ -60,14 +60,14 @@ export const initWebSocket = () => {
   // Finance updates
   socket.on("finance_update", (data) => {
     if (socketCallbacks.finance) {
-      socketCallbacks.finance(data);
+      socketCallbacks.finance.forEach(cb => cb(data));
     }
   });
 
   // News updates
   socket.on("news_update", (data) => {
     if (socketCallbacks.news) {
-      socketCallbacks.news(data);
+      socketCallbacks.news.forEach(cb => cb(data));
     }
   });
 
@@ -75,7 +75,7 @@ export const initWebSocket = () => {
   socket.on("change_theme", (data) => {
     console.log("🎨 Received change_theme event:", data);
     if (socketCallbacks.change_theme) {
-      socketCallbacks.change_theme(data);
+      socketCallbacks.change_theme.forEach(cb => cb(data));
     } else {
       console.warn("⚠️ No callback registered for change_theme");
     }
@@ -84,7 +84,7 @@ export const initWebSocket = () => {
   socket.on("add_to_watchlist", (data) => {
     console.log("➕ Received add_to_watchlist event:", data);
     if (socketCallbacks.add_to_watchlist) {
-      socketCallbacks.add_to_watchlist(data);
+      socketCallbacks.add_to_watchlist.forEach(cb => cb(data));
     } else {
       console.warn("⚠️ No callback registered for add_to_watchlist");
     }
@@ -93,18 +93,14 @@ export const initWebSocket = () => {
   socket.on("remove_from_watchlist", (data) => {
     console.log("➖ Received remove_from_watchlist event:", data);
     if (socketCallbacks.remove_from_watchlist) {
-      socketCallbacks.remove_from_watchlist(data);
-    } else {
-      console.warn("⚠️ No callback registered for remove_from_watchlist");
+      socketCallbacks.remove_from_watchlist.forEach(cb => cb(data));
     }
   });
 
   socket.on("navigate", (data) => {
     console.log("🧭 Received navigate event:", data);
     if (socketCallbacks.navigate) {
-      socketCallbacks.navigate(data);
-    } else {
-      console.warn("⚠️ No callback registered for navigate");
+      socketCallbacks.navigate.forEach(cb => cb(data));
     }
   });
 
@@ -112,7 +108,7 @@ export const initWebSocket = () => {
   socket.on("report_progress", (data) => {
     console.log("📊 Report progress:", data);
     if (socketCallbacks.report_progress) {
-      socketCallbacks.report_progress(data);
+      socketCallbacks.report_progress.forEach(cb => cb(data));
     }
   });
 
@@ -121,7 +117,11 @@ export const initWebSocket = () => {
 
 // Register callback for data updates
 export const onDataUpdate = (type, callback) => {
-  socketCallbacks[type] = callback;
+  if (!socketCallbacks[type]) socketCallbacks[type] = new Set();
+  socketCallbacks[type].add(callback);
+  return () => {
+    if (socketCallbacks[type]) socketCallbacks[type].delete(callback);
+  };
 };
 
 
@@ -331,12 +331,21 @@ export const sendChatMessage = async (message, sessionId = null) => {
   if (sessionId) {
     payload.session_id = sessionId;
   }
+  
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  
+  // Inject Gemini API Key if available
+  const geminiKey = localStorage.getItem('gemini_key');
+  if (geminiKey) {
+    headers["X-Gemini-Key"] = geminiKey;
+  }
+
   // Chat API can return 429 when Gemini quota is hit; avoid throwing so UI can show the message.
   const response = await fetch(`${API_BASE_URL}/api/chat`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -377,8 +386,13 @@ export default {
 
   // Analytics
   getAnalytics,
-
-
+  getMacroThemes: () => apiFetch('/api/analytics/macro-themes'),
+  getCreditIndex: () => apiFetch('/api/analytics/credit-index'),
+  getTopMovers: () => apiFetch('/api/analytics/top-movers'),
+  
+  // SSE Streaming
+  streamCompanyReport: (ticker) => new EventSource(`${API_BASE_URL}/api/company/${ticker}/report/stream`),
+  streamProjectReport: (id) => new EventSource(`${API_BASE_URL}/api/project/${id}/report/stream`),
   // Frontend Actions
   changeTheme,
   addToWatchlist,

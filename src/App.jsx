@@ -1,111 +1,75 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
+import TickerTape from './components/TickerTape';
+import AIChat from './components/AIChat';
 import Dashboard from './pages/Dashboard';
 import ReportPage from './pages/ReportPage';
 import ProjectsPage from './pages/ProjectsPage';
+import CreditIndexPage from './pages/CreditIndexPage';
+import CompaniesPage from './pages/CompaniesPage';
+import MacroPage from './pages/MacroPage';
+import MacroDetailPage from './pages/MacroDetailPage';
+import NewsPage from './pages/NewsPage';
 import * as api from './services/api';
-import { ThemeContext } from './context/ThemeContext';
 import './index.css';
 
 function AppContent() {
-  const [theme, setTheme] = React.useState('dark'); // 'dark' or 'light'
   const navigate = useNavigate();
-  const lastThemeChangeRef = React.useRef(0);
-
-  const toggleTheme = async () => {
-    try {
-      // Debounce to prevent rapid double-clicks
-      const now = Date.now();
-      if (now - lastThemeChangeRef.current < 500) {
-        console.log('⏱️ Theme change debounced (too fast)');
-        return;
-      }
-      lastThemeChangeRef.current = now;
-
-      // Call backend to broadcast theme change to all connected clients
-      await api.changeTheme();
-      console.log('🎨 Theme change request sent to backend');
-      // The actual theme toggle will happen when we receive the WebSocket event
-    } catch (error) {
-      console.error('❌ Failed to call backend theme change:', error);
-      // Fallback to local theme change if backend call fails
-      setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-    }
-  };
+  const [companies, setCompanies] = React.useState([]);
 
   React.useEffect(() => {
-    // Initialize WebSocket and listen for frontend action commands
-    try {
-      console.log('🔌 Initializing WebSocket connection...');
-      api.initWebSocket();
+    // Init WebSocket once
+    api.initWebSocket();
 
-      let themeChangeTimeout = null;
+    // Populate ticker tape on load
+    api.getCompanies().then(data => {
+      if (Array.isArray(data)) setCompanies(data);
+    }).catch(() => {});
 
-      // Listen for theme change commands
-      api.onDataUpdate('change_theme', (data) => {
-        console.log('🎨 THEME CHANGE EVENT RECEIVED!', data);
-        
-        // Debounce to prevent double-processing if event fires multiple times
-        if (themeChangeTimeout) {
-          console.log('⏱️ Ignoring duplicate theme change event');
-          return;
-        }
-        
-        // Toggle theme state directly (not calling toggleTheme to avoid infinite loop)
-        setTheme(prev => {
-          const newTheme = prev === 'dark' ? 'light' : 'dark';
-          console.log(`✅ Theme toggled: ${prev} → ${newTheme}`);
-          return newTheme;
-        });
-        
-        // Set timeout to allow next theme change after 500ms
-        themeChangeTimeout = setTimeout(() => {
-          themeChangeTimeout = null;
-        }, 500);
-      });
+    // Live finance updates → keep ticker tape fresh
+    api.onDataUpdate('finance', (data) => {
+      const list = Array.isArray(data) ? data : data?.data || [];
+      if (list.length > 0) setCompanies(list);
+    });
 
-      // Listen for navigation commands
-      api.onDataUpdate('navigate', (data) => {
-        console.log('🧭 NAVIGATION EVENT RECEIVED!', data);
-        if (data.action === 'projects') {
-          console.log('📍 Navigating to /projects');
-          navigate('/projects');
-        } else if (data.action === 'project') {
-          // Navigate to individual project detail page
-          const projectId = data.project_id;
-          console.log(`📍 Navigating to /report/${projectId}`);
-          navigate(`/report/${projectId}`);
-        } else if (data.action === 'company') {
-          // Use ticker if available, otherwise fall back to company_name
-          const urlId = data.ticker || data.company_name;
-          console.log(`📍 Navigating to /report/${urlId}`);
-          // Navigate to company report page
-          navigate(`/report/${urlId}`);
-        }
-      });
-
-      // Note: Watchlist events (add_to_watchlist, remove_from_watchlist) are handled
-      // in Dashboard.jsx where the watchlist state is managed
-
-      console.log('✅ All WebSocket event listeners registered');
-
-    } catch (err) {
-      console.error('❌ WebSocket setup error:', err);
-    }
+    // Navigation commands from AI bot
+    api.onDataUpdate('navigate', (data) => {
+      if (data.action === 'projects')       navigate('/projects');
+      else if (data.action === 'companies') navigate('/companies');
+      else if (data.action === 'macro')     navigate('/macro');
+      else if (data.action === 'news')      navigate('/news');
+      else if (data.action === 'index')     navigate('/index');
+      else if (data.action === 'project')   navigate(`/report/${data.project_id}`);
+      else if (data.action === 'company')   navigate(`/report/${data.ticker || data.company_name}`);
+    });
   }, [navigate]);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      <div className={`min-h-screen ${theme === 'dark' ? 'bg-gray-50' : 'bg-white'}`}>
-        <Navbar />
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
+      {/* Scrolling equity tape — topmost element */}
+      <TickerTape companies={companies} />
+
+      {/* Bloomberg nav bar */}
+      <Navbar />
+
+      {/* Page content */}
+      <main style={{ flex: 1, overflowY: 'auto' }}>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/report/:id" element={<ReportPage />} />
-          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/"              element={<Dashboard />} />
+          <Route path="/index"         element={<CreditIndexPage />} />
+          <Route path="/projects"      element={<ProjectsPage />} />
+          <Route path="/companies"     element={<CompaniesPage />} />
+          <Route path="/macro"         element={<MacroPage />} />
+          <Route path="/macro/:theme"  element={<MacroDetailPage />} />
+          <Route path="/news"          element={<NewsPage />} />
+          <Route path="/report/:id"    element={<ReportPage />} />
         </Routes>
-      </div>
-    </ThemeContext.Provider>
+      </main>
+
+      {/* Floating AI chat — always visible */}
+      <AIChat />
+    </div>
   );
 }
 

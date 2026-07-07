@@ -1,788 +1,294 @@
-import React from "react";
-import { useParams, Link } from "react-router-dom";
-import {
-  ArrowLeft,
-  ExternalLink,
-  Building2,
-  MapPin,
-  Sparkles,
-  TrendingUp,
-  MessageCircle,
-  Send,
-  Award,
-  FileText,
-  RefreshCw,
-  Zap,
-  Clock
-} from "lucide-react";
-import api from "../services/api";
+import React from 'react';
+import { useParams, Link } from 'react-router-dom';
+import * as api from '../services/api';
+import StatCard from '../components/StatCard';
+import SentimentBadge from '../components/SentimentBadge';
+import AgentTracePanel from '../components/AgentTracePanel';
+import EntityGraph from '../components/EntityGraph';
+import ReactMarkdown from 'react-markdown';
+import RealtimeChart from '../components/RealtimeChart';
+
+const fmtPrice = v => v ? `$${parseFloat(v).toFixed(2)}` : '—';
+const fmtChg   = v => { const n = parseFloat(v); return <span className={`mono ${n>=0?'pos':'neg'}`}>{n>=0?'+':''}{n.toFixed(2)}%</span>; };
+const fmtNum   = (v, d=3) => v != null ? parseFloat(v).toFixed(d) : '—';
+
+const SignalRow = ({ label, value, color }) => (
+  <div style={{
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '7px 0',
+    borderBottom: '1px solid var(--border-subtle)',
+  }}>
+    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{label}</span>
+    <span className="mono" style={{ fontSize: '12px', color: color || 'var(--text-primary)' }}>{value}</span>
+  </div>
+);
 
 const ReportPage = () => {
-  const { id } = useParams();
+  const { id } = useParams(); // id is ticker or project ID
   
-  // Company state
-  const [company, setCompany] = React.useState(null);
-  const [companyInsights, setCompanyInsights] = React.useState(null);
-  const [companyFutureImpact, setCompanyFutureImpact] = React.useState(null);
-  const [isGeneratingAI, setIsGeneratingAI] = React.useState(false);
+  const [data, setData] = React.useState(null);
+  const [news, setNews] = React.useState([]);
+  const [themes, setThemes] = React.useState([]);
+  const [projects, setProjects] = React.useState([]);
   
-  // Project state  
-  const [project, setProject] = React.useState(null);
-  const [projectReport, setProjectReport] = React.useState(null);
-  const [reportLoading, setReportLoading] = React.useState(false);
-  
-  // Chat state (common)
-  const [chatMessages, setChatMessages] = React.useState([]);
-  const [chatInput, setChatInput] = React.useState("");
-  const [chatLoading, setChatLoading] = React.useState(false);
-  
-  // Loading/error state
+  const [isProject, setIsProject] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState(null);
   
-  // Progress tracking state
-  const [progressSteps, setProgressSteps] = React.useState([]);
-  const [currentProgress, setCurrentProgress] = React.useState(null);
-  
-  // Ref to prevent double-fetching in React StrictMode
-  const hasFetched = React.useRef(false);
+  const [activeTab, setActiveTab] = React.useState('Overview');
+  const [reportHtml, setReportHtml] = React.useState(() => sessionStorage.getItem(`report_${id}`) || '');
 
-  // Setup WebSocket listener for progress updates
+  // Reset report if we navigate to a new ID that isn't cached
   React.useEffect(() => {
-    const socket = api.initWebSocket();
-    
-    const progressHandler = (data) => {
-      if (data.id === id) {
-        setCurrentProgress(data.message);
-        if (data.step) {
-          setProgressSteps(prev => {
-            const existing = prev.find(s => s.step === data.step);
-            if (existing) return prev;
-            return [...prev, { step: data.step, message: data.message, timestamp: Date.now() }];
+    setReportHtml(sessionStorage.getItem(`report_${id}`) || '');
+  }, [id]);
+
+  React.useEffect(() => {
+    const unsub = api.onDataUpdate('finance', (updates) => {
+      const list = Array.isArray(updates) ? updates : updates?.data || [];
+      const match = list.find(c => c.ticker === id);
+      if (match) {
+        setData(prev => prev ? { ...prev, ...match } : match);
+      }
+    });
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [id]);
+
+  React.useEffect(() => {
+    // 1. Try to fetch as company
+    api.getCompanyById(id).then(res => {
+      if (res.success && res.data) {
+        setIsProject(false);
+        const comp = res.data;
+        
+        // Enrich with analytics data
+        fetch('http://localhost:5001/api/analytics/top-movers')
+          .then(r => r.json())
+          .then(mv => {
+            const enriched = mv.companies?.find(c => c.ticker === comp.ticker);
+            setData(enriched ? { ...comp, ...enriched } : comp);
           });
-        }
-      }
-    };
-    
-    api.onDataUpdate('report_progress', progressHandler);
-    
-    return () => {
-      api.onDataUpdate('report_progress', null);
-    };
-  }, [id]);
-
-  // Fetch data from backend
-  React.useEffect(() => {
-    const fetchData = async () => {
-      // Prevent double-fetch in React StrictMode (development only)
-      if (hasFetched.current) return;
-      hasFetched.current = true;
-      
-      try {
-        setLoading(true);
-        setProgressSteps([]);
-        setCurrentProgress(null);
-
-        // Try to fetch as company first
-        const companyResult = await api.getCompanyById(id);
-        if (companyResult.success) {
-          setCompany(companyResult.data);
           
-          // Try to load cached insights silently
-          const cachedInsights = await api.getCompanyInsights(id, false, true);
-          if (cachedInsights.success) setCompanyInsights(cachedInsights.data);
-          const cachedFuture = await api.getFutureImpactAnalysis(id, false, true);
-          if (cachedFuture.success) setCompanyFutureImpact(cachedFuture.data);
-          
-        } else {
-          // Try as project
-          const projectResult = await api.getProjectById(id);
-          if (projectResult.success) {
-            setProject(projectResult.data);
-            
-            // Try to load cached report silently
-            const cachedReport = await api.getProjectReport(id, false, true);
-            if (cachedReport.success) setProjectReport(cachedReport.data);
-            
-          } else {
-            setError("Not found");
+        // Fetch news for company (fallback to industry if empty)
+        api.fastSearch(comp.company_name || comp.ticker).then(fs => {
+          if (fs.data?.news && fs.data.news.length > 0) {
+            setNews(fs.data.news);
+          } else if (comp.industry) {
+            // Fallback to industry news
+            fetch(`http://localhost:5001/api/news?limit=10`).then(r => r.json()).then(indNews => {
+              // Optionally filter by industry keyword if backend doesn't support it, but for now just show top news
+              setNews(indNews.data || []);
+            }).catch(() => {});
           }
-        }
-      } catch (err) {
-        console.error("Error fetching report data:", err);
-        setError("Failed to load data");
-      } finally {
+          if (fs.data?.projects) setProjects(fs.data.projects);
+        });
+        
+        // Fetch themes
+        fetch('http://localhost:5001/api/analytics/macro-themes')
+          .then(r => r.json())
+          .then(th => setThemes(th.themes?.slice(0,3).map(t=>t.theme) || []));
+          
         setLoading(false);
+      } else {
+        // 2. Try as project
+        api.getProjectById(id).then(pres => {
+          if (pres.success) {
+            setIsProject(true);
+            setData(pres.data);
+            
+            // fetch news
+            api.fastSearch(pres.data.name).then(fs => {
+              if (fs.data?.news) setNews(fs.data.news);
+            });
+            setLoading(false);
+          } else {
+            setLoading(false);
+          }
+        });
       }
-    };
-
-    fetchData();
-    
-    // Reset fetch flag when id changes
-    return () => {
-      hasFetched.current = false;
-    };
+    });
   }, [id]);
 
-  const generateAIInsights = async (forceRefresh = false) => {
-    setIsGeneratingAI(true);
-    setProgressSteps([]);
-    setCurrentProgress(forceRefresh ? 'Forcing new AI analysis...' : 'Initializing AI analysis...');
-    
-    try {
-      if (company) {
-        setProgressSteps([{ step: 1, message: 'Fetching company insights...', timestamp: Date.now() }]);
-        setCurrentProgress('Fetching company insights...');
-        const insightsResult = await api.getCompanyInsights(id, forceRefresh);
-        if (insightsResult.success) {
-          setCompanyInsights(insightsResult.data);
-          setProgressSteps(prev => [...prev, { step: 2, message: 'Company insights loaded', timestamp: Date.now() }]);
-        }
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading entity data...</div>;
+  if (!data) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--red)' }}>Entity not found</div>;
 
-        setCurrentProgress('Analyzing future impact...');
-        setProgressSteps(prev => [...prev, { step: 3, message: 'Analyzing sustainability & future impact...', timestamp: Date.now() }]);
-        const futureResult = await api.getFutureImpactAnalysis(id, forceRefresh);
-        if (futureResult.success) {
-          setCompanyFutureImpact(futureResult.data);
-          setProgressSteps(prev => [...prev, { step: 4, message: 'Analysis complete', timestamp: Date.now() }]);
-        }
-      } else if (project) {
-        setReportLoading(true);
-        setProgressSteps([{ step: 1, message: 'Generating comprehensive project report...', timestamp: Date.now() }]);
-        setCurrentProgress('Generating comprehensive project report...');
-        const reportResult = await api.getProjectReport(id, forceRefresh);
-        if (reportResult.success) {
-          setProjectReport(reportResult.data);
-          setProgressSteps(prev => [...prev, { step: 2, message: 'Report generation complete', timestamp: Date.now() }]);
-        }
-      }
-    } catch (err) {
-      console.error("AI Generation failed:", err);
-    } finally {
-      setIsGeneratingAI(false);
-      setReportLoading(false);
-      setCurrentProgress(null);
-    }
-  };
-
-  const handleSendMessage = async () => {
-    if (!chatInput.trim() || chatLoading) return;
-
-    const userMessage = chatInput.trim();
-    setChatInput("");
-
-    // Add user message to chat
-    setChatMessages((prev) => [
-      ...prev,
-      { role: "user", content: userMessage },
-    ]);
-
-    setChatLoading(true);
-
-    try {
-      let result;
-      if (company) {
-        result = await api.askCompanyQuestion(id, userMessage);
-      } else if (project) {
-        result = await api.askProjectQuestion(id, userMessage);
-      }
-      
-      if (result.success) {
-        setChatMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: result.data.answer },
-        ]);
-      } else {
-        setChatMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "Sorry, I couldn't process your question. Please try again." },
-        ]);
-      }
-    } catch (err) {
-      console.error("Chat error:", err);
-      setChatMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "An error occurred. Please try again later." },
-      ]);
-    } finally {
-      setChatLoading(false);
-    }
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center p-4">
-        <div className="max-w-md w-full">
-          {/* Loading Header */}
-          <div className="text-center mb-8">
-            <div className="relative inline-flex items-center justify-center mb-6">
-              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-green-500"></div>
-              <Sparkles className="absolute w-6 h-6 text-green-400 animate-pulse" />
-            </div>
-            <h2 className="text-2xl font-bold text-green-400 mb-2">Loading Report</h2>
-            <p className="text-slate-400">Gathering comprehensive data...</p>
-          </div>
-
-          {/* Current Progress */}
-          {currentProgress && (
-            <div className="bg-slate-800/50 backdrop-blur-sm rounded-lg p-4 mb-4 border border-green-500/20">
-              <div className="flex items-center space-x-3">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
-                <p className="text-green-400 font-medium">{currentProgress}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Progress Steps */}
-          {progressSteps.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-slate-300 mb-3">Progress:</h3>
-              {progressSteps.map((step, index) => (
-                <div 
-                  key={index}
-                  className="flex items-start space-x-3 bg-slate-800/30 rounded-lg p-3 border border-slate-700/50 animate-slideIn"
-                  style={{ animationDelay: `${index * 100}ms` }}
-                >
-                  <div className="flex-shrink-0 mt-0.5">
-                    <div className="w-5 h-5 rounded-full bg-green-500/20 border-2 border-green-500 flex items-center justify-center">
-                      <div className="w-2 h-2 rounded-full bg-green-400"></div>
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-300">{step.message}</p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      {new Date(step.timestamp).toLocaleTimeString()}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Loading Animation */}
-          <div className="mt-6 flex justify-center space-x-1">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce"></div>
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || (!company && !project)) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-green-400 mb-4">Not Found</h2>
-          <p className="text-slate-400 mb-6">
-            {error || "The requested item could not be found."}
-          </p>
-          <Link
-            to="/"
-            className="text-green-400 hover:text-green-300 underline"
-          >
-            Return to Dashboard
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  const title = isProject ? data.name : data.company_name;
+  const subtitle = isProject ? `Project ID: ${data.id} | ${data.category}` : `Ticker: ${data.ticker} | ${data.industry}`;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 relative overflow-hidden">
-      {/* Animated background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-20 w-96 h-96 bg-green-500/10 rounded-full blur-3xl animate-float"></div>
-        <div
-          className="absolute bottom-20 right-20 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl animate-float"
-          style={{ animationDelay: "1s" }}
-        ></div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
-        {/* Back Button */}
-        <Link
-          to={company ? "/" : "/projects"}
-          className="inline-flex items-center space-x-2 text-green-400 hover:text-green-300 mb-6 transition"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          <span className="font-medium">Back to {company ? "Dashboard" : "Projects"}</span>
-        </Link>
-
-        {/* COMPANY VIEW */}
-        {company && (
-          <>
-            {/* SECTION 1: Basic Company Info */}
-            <div className="bg-gradient-to-br from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 mb-8 border border-green-500/30 animate-slideIn">
-              <div className="flex items-center space-x-3 mb-2">
-                <Building2 className="w-10 h-10 text-green-400" />
-                <h1 className="text-4xl font-bold bg-gradient-to-r from-green-400 via-emerald-300 to-green-400 bg-clip-text text-transparent">
-                  {company.name}
-                </h1>
-                <span className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-3 py-1 rounded-full text-sm font-semibold shadow-lg">
-                  {company.ticker}
-                </span>
-              </div>
-              <p className="text-lg text-slate-400 mb-6">{company.industry}</p>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
-                <div>
-                  <p className="text-sm text-slate-500">Stock Price</p>
-                  <p className="text-2xl font-bold text-slate-200">
-                    ${company.stock_price || "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">Market Cap</p>
-                  <p className="text-2xl font-bold text-slate-200">
-                    {company.market_cap || "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-500">GII Score</p>
-                  <p className="text-2xl font-bold text-emerald-400 flex flex-col">
-                    <span>{company.gii_score || "N/A"}/100</span>
-                    <span className="text-xs font-normal text-slate-500 mt-1">Green Investment Index</span>
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-slate-700">
-                <p className="text-slate-300 leading-relaxed mb-4">
-                  {company.description}
-                </p>
-                {company.website && (
-                  <a
-                    href={company.website}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-green-400 hover:text-green-300 transition"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    <span>Visit Website</span>
-                  </a>
-                )}
-              </div>
-            </div>
-
-            {/* SECTION 2: AI Insights & Summary */}
-            <div
-              className="bg-gradient-to-br from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 mb-8 border border-green-500/30 animate-slideIn"
-              style={{ animationDelay: "0.1s" }}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-green-400 flex items-center gap-2">
-                  <Sparkles className="w-6 h-6" />
-                  AI Insights & Summary
-                </h2>
-                <div className="flex items-center gap-4">
-                  {!companyInsights && !companyFutureImpact && !isGeneratingAI && (
-                    <button 
-                      onClick={() => generateAIInsights(false)}
-                      className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-medium py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 transition"
-                    >
-                      <Sparkles className="w-4 h-4" /> Generate AI Insights
-                    </button>
-                  )}
-                  {(companyInsights || companyFutureImpact) && !isGeneratingAI && (
-                    <button 
-                      onClick={() => generateAIInsights(true)}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 transition border border-slate-700"
-                      title="Force refresh AI insights (bypasses cache)"
-                    >
-                      <RefreshCw className="w-4 h-4" /> Force Refresh
-                    </button>
-                  )}
-                </div>
-              </div>
-              
-              {!companyInsights && !companyFutureImpact && !isGeneratingAI && (
-                <div className="text-center py-8">
-                  <p className="text-slate-400 mb-4">AI insights and future impact analysis are not generated yet.</p>
-                  <p className="text-sm text-slate-500">Click the button above to generate a comprehensive AI summary for this company.</p>
-                </div>
-              )}
-
-              {isGeneratingAI ? (
-                <div className="flex flex-col items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto mb-3"></div>
-                  {currentProgress && (
-                    <div className="text-center mt-4">
-                      <p className="text-green-400 font-medium mb-2">{currentProgress}</p>
-                      <div className="space-y-1 text-sm text-slate-400 text-left w-max mx-auto">
-                        {progressSteps.map((step, idx) => (
-                          <div key={idx} className="flex items-center gap-2">
-                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                            <span>{step.message}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-8">
-                  {companyInsights && (
-                    <div>
-                      <h3 className="text-xl font-semibold text-emerald-300 mb-4">General Insights</h3>
-                      <div className="prose prose-invert prose-green max-w-none">
-                        <div 
-                          className="text-slate-300 leading-relaxed"
-                          dangerouslySetInnerHTML={{ __html: companyInsights.insights }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  {companyFutureImpact && (
-                    <div className="pt-6 border-t border-slate-700/50">
-                      <h3 className="text-xl font-semibold text-purple-400 mb-4 flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5" /> Sustainability & Future Impact
-                      </h3>
-                      <div className="prose prose-invert prose-purple max-w-none">
-                        <div 
-                          className="text-slate-300 leading-relaxed"
-                          dangerouslySetInnerHTML={{ __html: companyFutureImpact.analysis }}
-                        />
-                      </div>
-                      
-                      {companyFutureImpact.timings && (
-                        <div className="mt-6 flex flex-wrap items-center gap-3 animate-fadeIn">
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/50 text-xs">
-                            <Zap className="w-3.5 h-3.5 text-yellow-400" />
-                            <span className="text-slate-400">RAG Fetch:</span>
-                            <span className="text-yellow-400 font-mono font-medium">
-                              {((companyFutureImpact.timings.news_rag || 0) + (companyFutureImpact.timings.projects_rag || 0)).toFixed(2)}s
-                            </span>
-                          </div>
-                          
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/50 text-xs">
-                            <Clock className="w-3.5 h-3.5 text-blue-400" />
-                            <span className="text-slate-400">LLM Generation:</span>
-                            <span className="text-blue-400 font-mono font-medium">
-                              {(companyFutureImpact.timings.llm_generation || 0).toFixed(2)}s
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-900/30 border border-emerald-500/30 text-xs ml-auto">
-                            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                            <span className="text-emerald-400/80">Total Time:</span>
-                            <span className="text-emerald-400 font-mono font-bold">
-                              {((companyFutureImpact.timings.news_rag || 0) + (companyFutureImpact.timings.projects_rag || 0) + (companyFutureImpact.timings.llm_generation || 0)).toFixed(2)}s
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* PROJECT VIEW */}
-        {project && (
-          <>
-            {/* SECTION 1: Project Details */}
-            <div className="bg-gradient-to-br from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 mb-8 border border-green-500/30 animate-slideIn">
-              <div className="flex items-start gap-6">
-                {project.image_url && (
-                  <img
-                    src={project.image_url}
-                    alt={project.name}
-                    className="w-32 h-32 object-cover rounded-xl border border-green-500/30"
-                  />
-                )}
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Award className="w-10 h-10 text-green-400" />
-                    <h1 className="text-4xl font-bold bg-gradient-to-r from-green-400 via-emerald-300 to-green-400 bg-clip-text text-transparent">
-                      {project.name}
-                    </h1>
-                  </div>
-                  <div className="flex items-center gap-3 mb-4">
-                    <span className="bg-green-500/20 text-green-300 px-3 py-1 rounded-full text-sm border border-green-500/30">
-                      {project.category}
-                    </span>
-                    <span className="flex items-center gap-1 text-slate-400">
-                      <MapPin className="w-4 h-4" />
-                      {project.country}
-                    </span>
-                    <span className="text-slate-500">ID: {project.project_id}</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
-                    <div>
-                      <p className="text-sm text-slate-500">Available Credits</p>
-                      <p className="text-2xl font-bold text-green-400">
-                        {project.available_credits?.toLocaleString() || 0}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-slate-500">Price per Credit</p>
-                      <p className="text-2xl font-bold text-emerald-400">
-                        ${project.price || 0}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-slate-500">Vintage Year</p>
-                      <p className="text-2xl font-bold text-slate-200">
-                        {project.vintage || "N/A"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-slate-500">Registry Status</p>
-                      <p className="text-2xl font-bold text-blue-400">
-                        {project.registry_status || "Active"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="pt-6 border-t border-slate-700">
-                    <p className="text-sm text-slate-500 mb-2">Methodology</p>
-                    <p className="text-slate-300 mb-4">{project.methodology || "N/A"}</p>
-                    
-                    <p className="text-sm text-slate-500 mb-2">Description</p>
-                    <p className="text-slate-300 leading-relaxed mb-4">
-                      {project.description || "No description available."}
-                    </p>
-
-                    {project.registry_url && (
-                      <a
-                        href={project.registry_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 text-green-400 hover:text-green-300 transition"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                        <span>View on Registry</span>
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* SECTION 2: AI-Generated Report */}
-            <div
-              className="bg-gradient-to-br from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 mb-8 border border-green-500/30 animate-slideIn"
-              style={{ animationDelay: "0.1s" }}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-green-400 flex items-center gap-2">
-                  <FileText className="w-6 h-6" />
-                  Comprehensive Project Report
-                </h2>
-                <div className="flex items-center gap-4">
-                  {!projectReport && !isGeneratingAI && (
-                    <button 
-                      onClick={() => generateAIInsights(false)}
-                      className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-medium py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 transition"
-                    >
-                      <Sparkles className="w-4 h-4" /> Generate AI Report
-                    </button>
-                  )}
-                  {projectReport && !isGeneratingAI && (
-                    <button 
-                      onClick={() => generateAIInsights(true)}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 px-4 rounded-lg shadow-lg flex items-center gap-2 transition border border-slate-700"
-                      title="Force refresh AI report (bypasses cache)"
-                    >
-                      <RefreshCw className="w-4 h-4" /> Force Refresh
-                    </button>
-                  )}
-                </div>
-              </div>
-              
-              {!projectReport && !isGeneratingAI && (
-                <div className="text-center py-8">
-                  <p className="text-slate-400 mb-4">The comprehensive AI report is not generated yet.</p>
-                  <p className="text-sm text-slate-500">Click the button above to generate a detailed report for this project.</p>
-                </div>
-              )}
-
-              {isGeneratingAI || reportLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="text-center max-w-lg mx-auto">
-                    {/* Spinner */}
-                    <div className="relative inline-flex items-center justify-center mb-6">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
-                      <Sparkles className="absolute w-5 h-5 text-green-400 animate-pulse" />
-                    </div>
-                    <p className="text-slate-300 text-lg font-medium mb-6">Generating AI Report...</p>
-                    
-                    {/* Current Progress */}
-                    {currentProgress && (
-                      <div className="bg-slate-800/50 backdrop-blur-sm rounded-lg p-4 mb-4 border border-green-500/20">
-                        <div className="flex items-center justify-center space-x-3">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
-                          <p className="text-green-400 font-medium">{currentProgress}</p>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Progress Steps */}
-                    {progressSteps.length > 0 && (
-                      <div className="space-y-2 text-left w-max mx-auto">
-                        <h3 className="text-sm font-semibold text-slate-300 mb-3 text-center">Progress:</h3>
-                        {progressSteps.map((step, idx) => (
-                          <div 
-                            key={idx} 
-                            className="flex items-start gap-3 bg-slate-800/30 rounded-lg p-3 border border-slate-700/50"
-                          >
-                            <div className="flex-shrink-0 mt-0.5">
-                              <div className="w-5 h-5 rounded-full bg-green-500/20 border-2 border-green-500 flex items-center justify-center">
-                                <div className="w-2 h-2 rounded-full bg-green-400"></div>
-                              </div>
-                            </div>
-                            <div className="flex-1">
-                              <span className="text-sm text-slate-300">{step.message}</span>
-                              <p className="text-xs text-slate-500 mt-1">
-                                {new Date(step.timestamp).toLocaleTimeString()}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    
-                    {/* Loading Animation */}
-                    <div className="mt-6 flex justify-center space-x-1">
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                  </div>
-                </div>
-              ) : projectReport ? (
-                <div>
-                  <div className="prose prose-invert prose-green max-w-none">
-                    <div 
-                      className="text-slate-300 leading-relaxed"
-                      dangerouslySetInnerHTML={{ __html: projectReport.report || "No report available." }}
-                    />
-                  </div>
-                  
-                  {projectReport.timings && (
-                    <div className="mt-6 flex flex-wrap items-center gap-3 animate-fadeIn">
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/50 text-xs">
-                        <Clock className="w-3.5 h-3.5 text-blue-400" />
-                        <span className="text-slate-400">LLM Generation:</span>
-                        <span className="text-blue-400 font-mono font-medium">
-                          {(projectReport.timings.llm_generation || 0).toFixed(2)}s
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-900/30 border border-emerald-500/30 text-xs ml-auto">
-                        <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400/80">Total Time:</span>
-                        <span className="text-emerald-400 font-mono font-bold">
-                          {(projectReport.timings.llm_generation || 0).toFixed(2)}s
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          </>
-        )}
-
-        {/* SECTION 3/4: Ask Me Anything - Chat Interface (Common for both) */}
-        <div
-          className="bg-gradient-to-br from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 border border-blue-500/30 animate-slideIn"
-          style={{ animationDelay: company ? "0.3s" : "0.2s" }}
-        >
-          <h2 className="text-2xl font-bold text-blue-400 mb-6 flex items-center gap-2">
-            <MessageCircle className="w-6 h-6" />
-            Ask Me Anything
-          </h2>
-
-          {/* Chat Messages */}
-          <div className="mb-6 space-y-4 max-h-96 overflow-y-auto">
-            {chatMessages.length === 0 ? (
-              <div className="text-center py-8">
-                <Sparkles className="w-12 h-12 text-blue-400 mx-auto mb-3 opacity-50" />
-                <p className="text-slate-400">
-                  Ask any question about {company ? "this company" : "this project"}
-                </p>
-              </div>
-            ) : (
-              chatMessages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex ${
-                    msg.role === "user" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  <div
-                    className={`max-w-[80%] p-4 rounded-lg ${
-                      msg.role === "user"
-                        ? "bg-blue-600 text-white"
-                        : "bg-slate-800 text-slate-200"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
-                      <div 
-                        className="prose prose-sm prose-invert max-w-none prose-headings:text-blue-300 prose-strong:text-blue-200 prose-a:text-blue-300"
-                        dangerouslySetInnerHTML={{ __html: msg.content }}
-                      />
-                    ) : (
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-            {chatLoading && (
-              <div className="flex justify-start">
-                <div className="bg-slate-800 p-4 rounded-lg">
-                  <div className="flex space-x-2">
-                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
-                    <div
-                      className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0.1s" }}
-                    ></div>
-                    <div
-                      className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0.2s" }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            )}
+    <div style={{ background: 'var(--bg)', minHeight: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div className="page-header" style={{ paddingBottom: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <Link to={isProject ? "/projects" : "/companies"} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            ← {isProject ? 'Carbon Projects' : 'Companies'}
+          </Link>
+          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>/</span>
+          <span style={{ fontSize: '11px', color: 'var(--green)' }}>{id}</span>
+        </div>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+          <div>
+            <h1 style={{ fontSize: 24 }}>{title}</h1>
+            <p style={{ marginTop: 4 }}>{subtitle}</p>
           </div>
-
-          {/* Chat Input */}
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={`Ask about ${company ? company.name : project?.name}...`}
-              className="flex-1 px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={chatLoading}
-            />
-            <button
-              onClick={handleSendMessage}
-              disabled={chatLoading || !chatInput.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg transition flex items-center gap-2"
-            >
-              <Send className="w-5 h-5" />
-              <span>Send</span>
-            </button>
-          </div>
+          {isProject ? (
+            <div style={{ textAlign: 'right' }}>
+              <div className="mono pos" style={{ fontSize: 24, fontWeight: 600 }}>${data.price || 0}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>SPOT $/T</div>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'right' }}>
+              <div className="mono" style={{ fontSize: 24, fontWeight: 600 }}>${data.price || data.stock_price || 0}</div>
+              <div style={{ fontSize: 12, marginTop: 2 }}>{fmtChg(data.change_percent)}</div>
+            </div>
+          )}
+        </div>
+        
+        {/* Tabs */}
+        <div className="tab-bar">
+          <div className={`tab-item ${activeTab === 'Overview' ? 'active' : ''}`} onClick={() => setActiveTab('Overview')}>Overview</div>
+          <div className={`tab-item ${activeTab === 'AI Analysis' ? 'active' : ''}`} onClick={() => setActiveTab('AI Analysis')}>AI Analysis</div>
+          <div className={`tab-item ${activeTab === 'News' ? 'active' : ''}`} onClick={() => setActiveTab('News')}>News</div>
         </div>
       </div>
+
+      <div className="page-body" style={{ flex: 1 }}>
+        {activeTab === 'Overview' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16 }}>
+            {/* Left Col */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {isProject ? (
+                <div className="panel">
+                  <div className="panel-header"><h3>Project Details</h3></div>
+                  <div style={{ padding: '0 14px' }}>
+                    <SignalRow label="Category" value={data.category || 'N/A'} />
+                    <SignalRow label="Country" value={data.country || 'N/A'} />
+                    <SignalRow label="Vintage" value={data.vintage || 'N/A'} />
+                    <SignalRow label="Methodology" value={data.methodology || 'N/A'} />
+                    <SignalRow label="Supply" value={data.available_credits ? Number(data.available_credits).toLocaleString() : 0} />
+                    <SignalRow label="Status" value={data.registry_status || 'N/A'} />
+                  </div>
+                </div>
+              ) : (
+                <div className="panel">
+                  <div className="panel-header"><h3>Live Signals</h3></div>
+                  <div style={{ padding: '0 14px' }}>
+                    <SignalRow label="Impact Rating"    value={data.impact_rating ? `${fmtNum(data.impact_rating)}/100` : 'N/A'} color={data.impact_rating>80?'var(--green)':data.impact_rating>60?'var(--amber)':'var(--red)'} />
+                    <SignalRow label="Policy Alignment" value={data.policy_alignment ? `${fmtNum(data.policy_alignment)}%` : 'N/A'} color={data.policy_alignment>80?'var(--green)':data.policy_alignment>50?'var(--amber)':'var(--red)'} />
+                    <SignalRow label="Momentum"         value={data.momentum ? `${data.momentum>=0?'+':''}${fmtNum(data.momentum)}` : '0.00'} color={data.momentum>0?'var(--green)':data.momentum<0?'var(--red)':'var(--text-muted)'} />
+                    <SignalRow label="Market Risk"      value={fmtNum(data.risk)} color={data.risk>0.4?'var(--red)':data.risk>0.2?'var(--amber)':'var(--green)'} />
+                    <SignalRow label="Sentiment (24h)"  value={`${data.sentiment_24h>=0?'+':''}${fmtNum(data.sentiment_24h)}`} color={data.sentiment_24h>0?'var(--green)':data.sentiment_24h<0?'var(--red)':'var(--text-muted)'} />
+                    <SignalRow label="News Volume"      value={data.news_24h || 0} />
+                    <SignalRow label="ESG Rating"       value={data.esg_rating || 'N/A'} />
+                  </div>
+                </div>
+              )}
+              
+              {/* Entity Graph */}
+              <EntityGraph 
+                ticker={id} 
+                macroThemes={themes} 
+                newsArticles={news} 
+                relatedProjects={projects} 
+                onNodeClick={() => {}}
+              />
+            </div>
+            
+            {/* Right Col */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {data.description && (
+                <div className="panel" style={{ padding: '16px 20px', fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+                  {data.description}
+                </div>
+              )}
+              
+              <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px 20px' }}>
+                <RealtimeChart currentPrice={data.price} symbol={id} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'AI Analysis' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: 16, height: '100%' }}>
+            {/* Left: Agent Trace */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ fontSize: 13, color: 'var(--text-primary)', marginBottom: 12 }}>
+                Multi-Agent Supervisor Pipeline
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
+                A planner agent orchestrates specialized sub-agents (NewsAgent, MarketAgent, WebAgent) to gather live signals, search the Web, and synthesize a real-time research report.
+              </p>
+              
+              <AgentTracePanel 
+                id={id}
+                streamUrl={`http://localhost:5001/api/${isProject ? 'project' : 'company'}/${id}/report/stream`}
+                onComplete={html => {
+                  setReportHtml(html);
+                  sessionStorage.setItem(`report_${id}`, html);
+                }}
+              />
+            </div>
+            
+            {/* Right: Rendered Report */}
+            <div className="panel" style={{ padding: '24px 32px', overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+              {reportHtml ? (
+                <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
+                  <ReactMarkdown className="report-content markdown-body">
+                    {reportHtml}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                  Run generation to view report...
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'News' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%' }}>
+            <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <div className="panel-header"><h3>News & Content ({news.length})</h3></div>
+              <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+                {news.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No content available</div>}
+                {news.map((a, i) => (
+                  <a key={i} href={a.link || a.url} target="_blank" rel="noopener noreferrer"
+                    style={{ display: 'block', padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', transition: 'background 120ms' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                  >
+                    <div style={{ fontSize: 14, color: 'var(--text-primary)', marginBottom: 8, fontWeight: 500 }}>{a.title}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.5 }}>
+                      {a.summary}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span className="badge badge-muted">{a.source || 'News'}</span>
+                      <SentimentBadge label={a.sentiment || 'Neutral'} />
+                      <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
+                        {new Date(a.date).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {/* Dynamic CSS for rendered markdown/html in report */}
+      <style>{`
+        .report-content h1, .report-content h2, .report-content h3, .report-content h4 { color: var(--text-primary); font-size: 14px; margin: 24px 0 12px 0; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        .report-content h1:first-child, .report-content h2:first-child, .report-content h3:first-child, .report-content h4:first-child { margin-top: 0; }
+        .report-content p { margin-bottom: 16px; }
+        .report-content ul { padding-left: 20px; margin-bottom: 16px; }
+        .report-content li { margin-bottom: 6px; }
+        .report-content strong { color: var(--text-primary); }
+      `}</style>
     </div>
   );
 };
