@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: carbon
       POSTGRES_PASSWORD: carbonpw
       POSTGRES_DB: carbon_intel
-    command: ["postgres", "-c", "config_file=/db/postgres.conf"]
+    command: [ "postgres", "-c", "config_file=/db/postgres.conf" ]
     ports:
       - "5432:5432"
     volumes:
@@ -14,7 +14,7 @@ services:
       - ./backend/carbon-intelligence/db/init.sql:/docker-entrypoint-initdb.d/init.sql
       - ./backend/carbon-intelligence/db/postgres.conf:/db/postgres.conf
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U carbon"]
+      test: [ "CMD-SHELL", "pg_isready -U carbon" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -28,7 +28,7 @@ services:
     ports:
       - "2181:2181"
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      test: [ "CMD", "nc", "-z", "localhost", "2181" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,7 +49,7 @@ services:
     ports:
       - "29092:29092"
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server=localhost:9092"]
+      test: [ "CMD", "kafka-broker-api-versions", "--bootstrap-server=localhost:9092" ]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -74,7 +74,7 @@ services:
     ports:
       - "8083:8083"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8083/" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -86,7 +86,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -144,7 +144,7 @@ services:
     volumes:
       - ./backend/carbon-intelligence/server/output:/app/output
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 50051)); s.close()"]
+      test: [ "CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 50051)); s.close()" ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -198,9 +198,9 @@ services:
       NEWS_API_KEY: ${NEWS_API_KEY:-}
       LLM_MODE: ollama
       OLLAMA_BASE_URL: http://host.docker.internal:11434
-      OLLAMA_MODEL: qwen2.5
+      OLLAMA_MODEL: llama3.2:3b
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')" ]
       interval: 20s
       timeout: 5s
       retries: 10

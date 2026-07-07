@@ -43,3 +43,4 @@ langchain-tavily
 sentence-transformers
 faiss-cpu
 langchain-ollama
+rank_bm25==0.2.2

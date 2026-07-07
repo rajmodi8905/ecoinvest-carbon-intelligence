@@ -22,50 +22,61 @@ const Navbar = () => {
     setIsSearching(true);
     
     try {
-      // Search companies from backend
-      const companyResult = await api.searchCompanies(query);
+      // Run both standard company search and our new Fast RAG Search in parallel!
+      const [companyResult, fastSearchResult] = await Promise.all([
+        api.searchCompanies(query).catch(() => ({ data: [] })),
+        api.fastSearch(query).catch(() => ({ data: { projects: [], news: [] } }))
+      ]);
+      
       const companies = Array.isArray(companyResult) ? companyResult : companyResult?.data || [];
+      const fastData = fastSearchResult?.data || { projects: [], news: [] };
       
-      // Remove duplicates by using unique IDs
-      const uniqueCompanies = [];
+      const combinedSuggestions = [];
+      
+      // 1. Add top 2 Companies
       const seenIds = new Set();
-      
       for (const c of companies) {
         const id = c.ticker || c.id;
         if (!seenIds.has(id)) {
           seenIds.add(id);
-          uniqueCompanies.push({
+          combinedSuggestions.push({
             id: id,
             name: c.company_name || c.name,
             type: 'Company',
-            description: c.industry || c.description || ''
+            description: c.industry || c.description || '',
+            url: `/report/${id}`
           });
         }
-        if (uniqueCompanies.length >= 5) break;
+        if (combinedSuggestions.length >= 2) break;
       }
       
-      // If no companies found, search projects as fallback
-      if (uniqueCompanies.length === 0) {
-        try {
-          const projectResult = await api.searchProjects(query, 5);
-          const projects = projectResult?.data || [];
-          
-          const projectSuggestions = projects.map(p => ({
+      // 2. Add top 3 Projects from Fast RAG
+      for (const p of fastData.projects || []) {
+        if (!seenIds.has(p.id)) {
+          seenIds.add(p.id);
+          combinedSuggestions.push({
             id: p.id,
             name: p.name,
             type: 'Project',
-            description: `${p.category || ''} • ${p.country || ''}`,
-            category: p.category
-          }));
-          
-          setSuggestions(projectSuggestions);
-        } catch (projectError) {
-          console.error('Project search error:', projectError);
-          setSuggestions([]);
+            description: `Fast RAG Match: ${p.category || ''}`,
+            url: `/report/${p.id}`
+          });
         }
-      } else {
-        setSuggestions(uniqueCompanies);
       }
+      
+      // 3. Add top 2 News from Fast RAG
+      for (const n of fastData.news || []) {
+        combinedSuggestions.push({
+          id: n.id,
+          name: n.title,
+          type: 'News',
+          description: `Fast RAG News Article`,
+          url: n.url,
+          external: true
+        });
+      }
+      
+      setSuggestions(combinedSuggestions);
     } catch (error) {
       console.error('Search error:', error);
       setSuggestions([]);
@@ -87,15 +98,23 @@ const Navbar = () => {
   const handleSearch = (e) => {
     e.preventDefault();
     if (searchQuery.trim() && suggestions.length > 0) {
-      // Navigate to first suggestion
-      navigate(`/report/${suggestions[0].id}`);
+      const first = suggestions[0];
+      if (first.external) {
+        window.open(first.url, '_blank');
+      } else {
+        navigate(first.url);
+      }
       setSearchQuery('');
       setShowSuggestions(false);
     }
   };
 
-  const selectSuggestion = (companyId) => {
-    navigate(`/report/${companyId}`);
+  const selectSuggestion = (suggestion) => {
+    if (suggestion.external) {
+      window.open(suggestion.url, '_blank');
+    } else {
+      navigate(suggestion.url);
+    }
     setSearchQuery('');
     setShowSuggestions(false);
   };
@@ -144,7 +163,7 @@ const Navbar = () => {
                     {suggestions.map((item, idx) => (
                       <button
                         key={item.id}
-                        onClick={() => selectSuggestion(item.id)}
+                        onClick={() => selectSuggestion(item)}
                         className={`w-full text-left px-4 py-2.5 ${theme === 'dark' ? 'hover:bg-slate-800 border-slate-700/50' : 'hover:bg-gray-50 border-gray-200'} transition-colors duration-200 border-b last:border-b-0 group cursor-pointer`}
                       >
                         <div className="flex items-start justify-between pointer-events-none">

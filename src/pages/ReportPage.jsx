@@ -11,7 +11,9 @@ import {
   Send,
   Award,
   FileText,
-  RefreshCw
+  RefreshCw,
+  Zap,
+  Clock
 } from "lucide-react";
 import api from "../services/api";
 
@@ -450,6 +452,34 @@ const ReportPage = () => {
                           dangerouslySetInnerHTML={{ __html: companyFutureImpact.analysis }}
                         />
                       </div>
+                      
+                      {companyFutureImpact.timings && (
+                        <div className="mt-6 flex flex-wrap items-center gap-3 animate-fadeIn">
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/50 text-xs">
+                            <Zap className="w-3.5 h-3.5 text-yellow-400" />
+                            <span className="text-slate-400">RAG Fetch:</span>
+                            <span className="text-yellow-400 font-mono font-medium">
+                              {((companyFutureImpact.timings.news_rag || 0) + (companyFutureImpact.timings.projects_rag || 0)).toFixed(2)}s
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/50 text-xs">
+                            <Clock className="w-3.5 h-3.5 text-blue-400" />
+                            <span className="text-slate-400">LLM Generation:</span>
+                            <span className="text-blue-400 font-mono font-medium">
+                              {(companyFutureImpact.timings.llm_generation || 0).toFixed(2)}s
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-900/30 border border-emerald-500/30 text-xs ml-auto">
+                            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-emerald-400/80">Total Time:</span>
+                            <span className="text-emerald-400 font-mono font-bold">
+                              {((companyFutureImpact.timings.news_rag || 0) + (companyFutureImpact.timings.projects_rag || 0) + (companyFutureImpact.timings.llm_generation || 0)).toFixed(2)}s
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -633,11 +663,33 @@ const ReportPage = () => {
                   </div>
                 </div>
               ) : projectReport ? (
-                <div className="prose prose-invert prose-green max-w-none">
-                  <div 
-                    className="text-slate-300 leading-relaxed"
-                    dangerouslySetInnerHTML={{ __html: projectReport.report || "No report available." }}
-                  />
+                <div>
+                  <div className="prose prose-invert prose-green max-w-none">
+                    <div 
+                      className="text-slate-300 leading-relaxed"
+                      dangerouslySetInnerHTML={{ __html: projectReport.report || "No report available." }}
+                    />
+                  </div>
+                  
+                  {projectReport.timings && (
+                    <div className="mt-6 flex flex-wrap items-center gap-3 animate-fadeIn">
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/50 text-xs">
+                        <Clock className="w-3.5 h-3.5 text-blue-400" />
+                        <span className="text-slate-400">LLM Generation:</span>
+                        <span className="text-blue-400 font-mono font-medium">
+                          {(projectReport.timings.llm_generation || 0).toFixed(2)}s
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-900/30 border border-emerald-500/30 text-xs ml-auto">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400/80">Total Time:</span>
+                        <span className="text-emerald-400 font-mono font-bold">
+                          {(projectReport.timings.llm_generation || 0).toFixed(2)}s
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : null}
             </div>

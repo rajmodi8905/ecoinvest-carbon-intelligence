@@ -587,109 +587,104 @@ tools = [
 ]
 
 # ============================================================================
-# INITIALIZE AGENT
+# INITIALIZE AGENTIC ROUTING & DOMAIN AGENTS
 # ============================================================================
 
-agent = None
-
-# System prompt for the agent
-SYSTEM_PROMPT = """You are EcoInvest AI, a comprehensive assistant guiding users through EcoInvest - a Carbon Intelligence & ESG Investment Platform.
-
-🌱 YOUR ROLE:
-You're an expert guide helping users navigate sustainability investments, ESG analysis, carbon markets, and green projects. You have access to powerful tools for deep research and analysis.
-
-🛠️ YOUR COMPREHENSIVE CAPABILITIES:
-
-**Company Analysis:**
-- get_detailed_company_info - Get stock price, ESG rating, GII score, industry, description
-- list_available_companies - See all companies in database
-- **For AI insights & future impact analysis**: Navigate to the company's report page using go_to_detail_page
-
-**Carbon Projects:**
-- get_project_details - Get basic project info (country, methodology, credits, price)
-- search_carbon_projects - Search and discover carbon offset projects
-- **For AI-generated project reports**: Navigate to the project's detail page using go_to_detail_page with project ID
-
-**RAG-Powered Search (Real Data):**
-- search_carbon_news - Search latest ESG/carbon/sustainability news articles with sources and custom query always use this first if no information is found then only use web search tool
-- search_carbon_projects - Search carbon offset projects (renewable energy, REDD+, etc.)
-
-**Live News Feed:**
-- get_live_news - Get the latest news articles from the dashboard feed (limit: 1-50, optional source filter)
-- get_news_by_sentiment - Filter news by sentiment (Positive/Negative/Neutral)
-
-**Web Search:**
-- search_web - Search the internet for current information, trends, and real-time data only when needed
-
-**Platform Navigation:**
-- go_to_detail_page - Navigate to company OR project detail pages (auto-detects type, or specify 'company'/'project')
-- go_to_projects - Go to carbon projects marketplace (list view)
-- change_theme - Toggle light/dark mode
-
-**Watchlist:**
-- get_watchlist - View all companies currently in the user's watchlist
-- add_to_watchlist / remove_from_watchlist - Manage user's company watchlist
-
-💡 HOW TO ASSIST:
-- **Be proactive** - Guide users through the platform and suggest relevant tools
-- **Use tools intelligently** - For basic company info, use get_detailed_company_info. For deeper insights/reports, navigate to their report page
-- **News intelligence** - Use get_live_news for latest headlines, get_news_by_sentiment for sentiment-filtered news, and search_carbon_news for RAG-powered deep search
-- **Search first** - When asked about news/trends/projects, USE the appropriate news tool (get_live_news for latest, search_carbon_news for specific topics). Use search_carbon_projects for carbon projects. For current events or general topics, use search_web
-- **Navigate for reports** - When users ask for company insights, future impact, or comprehensive reports, navigate to the company's report page using go_to_detail_page
-- **Navigate for project details** - When users ask about specific project details or reports, navigate to the project's detail page using go_to_detail_page with the project ID
-- **Web search when needed** - Use search_web for current events, latest trends, or information not in the database
-- **Be conversational** - Friendly, helpful tone. Explain ESG/carbon concepts simply
-- **Provide context** - Don't just dump tool output - interpret and summarize key points
-- **Offer next steps** - Suggest relevant actions ("Want me to add them to your watchlist?" or "Should I open their detailed report page?")
-
-🎯 RESPONSE GUIDELINES:
-- Keep responses clear and concise (2-4 paragraphs for complex topics)
-- Use tools to get real data - don't make things up
-- When using RAG tools, summarize the key findings naturally
-- Explain technical terms (ESG, GII, carbon credits, REDD+) when needed
-- Minimal emojis (1-2 max per response)
-- When user asks to see/view a company report, navigate to the company page using go_to_detail_page
-- When user asks to see/view a project report, navigate using go_to_detail_page with the project ID/code (e.g., "VCS-2126", "GS-1234")
-- **IMPORTANT**: Carbon projects use IDs in format like "VCS-2126", "GS-1234" - use these EXACT codes when navigating to project pages
-
-🚫 AVOID:
-- Raw JSON or unformatted tool outputs
-- Overly technical jargon without explanation
-- Making up data when tools don't return results
-- Being robotic or formal
-
-You're the comprehensive guide to sustainable investing - help users discover, analyze, and understand green investments!"""
+memory = None
+agents = {}
+model = None
 
 try:
     if not LANGCHAIN_AVAILABLE:
         raise ImportError("LangChain/LangGraph not installed")
 
-    # Get shared LLM instance from centralized manager
     model = get_llm()
-
     if not model:
         logger.error("❌ LLM not available - agent cannot be created")
         raise Exception("LLM initialization failed")
 
-    # Message limit trimming can be applied to state using a state_modifier, but for simplicity
-    # we just use the system prompt as the state_modifier
+    memory = MemorySaver()
+    
+    # Define specialized toolsets
+    news_tools = [search_carbon_news, get_live_news, get_news_by_sentiment, search_web]
+    project_tools = [search_carbon_projects, get_project_details, search_web]
+    finance_tools = [get_detailed_company_info, list_available_companies, get_watchlist, add_to_watchlist, remove_from_watchlist, search_web]
+    nav_tools = [change_theme, go_to_detail_page, go_to_projects]
+    general_tools = tools # all tools as fallback
+    
+    # Create Domain-Specific Agents
+    agents["NEWS"] = create_react_agent(
+        model=model, tools=news_tools, checkpointer=memory,
+        prompt="You are an ESG News expert. Use the provided tools to search for live news, sentiment, and carbon trends."
+    )
+    agents["PROJECTS"] = create_react_agent(
+        model=model, tools=project_tools, checkpointer=memory,
+        prompt="You are a Carbon Projects expert. Use tools to find details about carbon offsets, REDD+, and renewable energy projects. Project IDs look like VCS-1234."
+    )
+    agents["FINANCE"] = create_react_agent(
+        model=model, tools=finance_tools, checkpointer=memory,
+        prompt="You are a Green Finance expert. Help users analyze company stock, ESG ratings, and manage their watchlist."
+    )
+    agents["NAVIGATION"] = create_react_agent(
+        model=model, tools=nav_tools, checkpointer=memory,
+        prompt="You are a Platform Navigator. Your only job is to navigate the user to specific pages (company reports, project details) or change UI themes."
+    )
+    GENERAL_PROMPT = """You are EcoInvest AI, a comprehensive assistant guiding users through EcoInvest - a Carbon Intelligence & ESG Investment Platform.
+    
+    🌱 YOUR ROLE:
+    You're an expert guide helping users navigate sustainability investments, ESG analysis, carbon markets, and green projects. You have access to powerful tools for deep research and analysis."""
 
-    # Create agent using modern langgraph API with memory support
-    # MemorySaver provides conversation persistence across requests
-    # This provides a production-ready agent implementation with ReAct loop
-    agent = create_react_agent(
-        model=model,
-        tools=tools,
-        prompt=SYSTEM_PROMPT,
-        checkpointer=MemorySaver()
+    agents["GENERAL"] = create_react_agent(
+        model=model, tools=general_tools, checkpointer=memory,
+        prompt=GENERAL_PROMPT # Fallback to original comprehensive prompt
     )
 
-    logger.info("✅ AI Chat agent initialized with 10-message limit and comprehensive tools (Gemini 2.5 Flash)")
+    logger.info("✅ Multi-Agent Routing system initialized successfully.")
 except Exception as e:
-    logger.error(f"❌ Failed to initialize AI chat agent: {e}")
+    logger.error(f"❌ Failed to initialize AI routing system: {e}")
     import traceback
     traceback.print_exc()
-    agent = None
+
+def route_query(query: str) -> str:
+    """Semantic router to pick the right domain agent."""
+    if not model: return "GENERAL"
+    prompt = f"""Analyze the user query and route it to EXACTLY ONE of the following agents:
+1. NEWS (for ESG news, sentiment, carbon trends)
+2. PROJECTS (for carbon offset projects, REDD+, wind energy)
+3. FINANCE (for company details, stock, ESG ratings, watchlist)
+4. NAVIGATION (for changing themes, navigating to pages)
+5. GENERAL (for general knowledge, web search, or if unsure)
+
+Query: {query}
+Respond with ONLY the exact category name (e.g., NEWS)."""
+    try:
+        from langchain_core.messages import HumanMessage
+        response = model.invoke([HumanMessage(content=prompt)])
+        content = str(response.content).strip().upper()
+        for cat in ["NEWS", "PROJECTS", "FINANCE", "NAVIGATION"]:
+            if cat in content: return cat
+        return "GENERAL"
+    except Exception:
+        return "GENERAL"
+
+def reflect_and_validate(query: str, response: str) -> str:
+    """Error-recovery loop reflection step."""
+    if not model: return "VALID"
+    prompt = f"""You are a Validation Guardrail.
+User asked: {query}
+Agent replied: {response}
+
+Did the agent successfully answer the user, or did it fail/hallucinate?
+If it's a good response, answer VALID.
+If it failed (e.g., "I don't have that info", tool error, or hallucination), answer ERROR."""
+    try:
+        from langchain_core.messages import HumanMessage
+        val = model.invoke([HumanMessage(content=prompt)])
+        content = str(val.content).strip().upper()
+        if "ERROR" in content: return "ERROR"
+        return "VALID"
+    except:
+        return "VALID"
 
 # ============================================================================
 # API ENDPOINT
@@ -697,7 +692,7 @@ except Exception as e:
 
 @aibot_bp.route('/api/chat', methods=['POST'])
 def chat():
-    """Chat endpoint using LangChain agent with Gemini and tool calling."""
+    """Chat endpoint using Agentic Routing and Error Recovery."""
     try:
         data = request.get_json()
         user_message = data.get('message', '')
@@ -705,79 +700,60 @@ def chat():
         
         logger.info(f"💬 Received message: {user_message}")
         
-        # Check if agent is available
-        if agent is None:
-            logger.warning("⚠️ AI agent not initialized")
-            return jsonify({
-                'success': False,
-                'error': 'AI service not available. Check Gemini API configuration.',
-                'response': "Sorry, the AI service is currently unavailable. Please check the Gemini API configuration."
-            }), 503
+        if not agents:
+            return jsonify({'success': False, 'error': 'AI agents unavailable'}), 503
+            
+        # 1. Routing
+        route = route_query(user_message)
+        logger.info(f"🧭 Routed query to agent: {route}")
         
-        # Invoke the agent using the modern API with memory support
-        # The checkpointer automatically handles conversation history per thread_id
-        # The agent follows the ReAct pattern and uses tools as needed
+        # 2. Execution
+        agent = agents.get(route, agents["GENERAL"])
         result = agent.invoke(
             {"messages": [{"role": "user", "content": user_message}]},
             {"configurable": {"thread_id": session_id}}
         )
         
-        # Extract the final response from the agent's message sequence
-        # The last message in the result should be the agent's final response
-        final_messages = result.get("messages", [])
-        if final_messages:
-            # Get the last message content - extract only the text, not metadata
-            last_message = final_messages[-1]
-            if hasattr(last_message, 'content'):
-                # Handle AIMessage with content attribute
-                content = last_message.content
-                # If content is a list (multimodal), extract text parts
-                if isinstance(content, list):
-                    text_parts = [item.get('text', '') if isinstance(item, dict) else str(item) 
-                                  for item in content if isinstance(item, dict) and item.get('type') == 'text']
-                    bot_response = ' '.join(text_parts).strip()
-                else:
-                    bot_response = str(content).strip()
-            elif isinstance(last_message, dict):
-                bot_response = last_message.get('content', "I've processed your request.")
-            else:
-                bot_response = str(last_message)
-        else:
-            bot_response = "I've processed your request."
+        def extract_response(res):
+            final_messages = res.get("messages", [])
+            if not final_messages: return "I've processed your request."
+            last_msg = final_messages[-1]
+            if hasattr(last_msg, 'content'):
+                if isinstance(last_msg.content, list):
+                    return ' '.join([item.get('text', '') for item in last_msg.content if isinstance(item, dict)]).strip()
+                return str(last_msg.content).strip()
+            elif isinstance(last_msg, dict):
+                return last_msg.get('content', '')
+            return str(last_msg)
+
+        bot_response = extract_response(result)
         
-        # Convert markdown to HTML for proper formatting on frontend
+        # 3. Reflection (Error Recovery)
+        validation = reflect_and_validate(user_message, bot_response)
+        if validation == "ERROR" and route != "GENERAL":
+            logger.warning(f"⚠️ Agent {route} failed. Recovering with GENERAL agent...")
+            result = agents["GENERAL"].invoke(
+                {"messages": [{"role": "user", "content": user_message}]},
+                {"configurable": {"thread_id": session_id + "_recovery"}} # separate thread for recovery
+            )
+            bot_response = extract_response(result)
+        
+        # Format HTML
         bot_response_html = markdown.markdown(bot_response, extensions=['nl2br', 'sane_lists'])
         
-        # Keep chat history for client-side display (memory is handled by checkpointer)
         if session_id not in chat_histories:
             chat_histories[session_id] = []
-        
-        chat_histories[session_id].append({"role": "user", "content": user_message})
-        chat_histories[session_id].append({"role": "assistant", "content": bot_response_html})
-        
-        # Keep last 20 messages (10 exchanges) for display purposes
+        chat_histories[session_id].extend([
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": bot_response_html}
+        ])
         if len(chat_histories[session_id]) > 20:
             chat_histories[session_id] = chat_histories[session_id][-20:]
-        
-        # Log response (truncate if too long to avoid console spam)
-        log_response = bot_response[:200] + "..." if len(bot_response) > 200 else bot_response
-        logger.info(f"🤖 Responding: {log_response}")
-        
-        return jsonify({
-            'success': True,
-            'response': bot_response_html
-        }), 200
+            
+        return jsonify({'success': True, 'response': bot_response_html}), 200
         
     except Exception as e:
         logger.error(f"❌ Error: {str(e)}")
         import traceback
         traceback.print_exc()
-        error_msg = str(e)
-        quota_hit = "quota" in error_msg.lower()
-        friendly = "Gemini quota exceeded. Please add billing or try again in a minute." if quota_hit else "Sorry, I encountered an error. Please try again."
-        status_code = 429 if quota_hit else 500
-        return jsonify({
-            'success': False,
-            'error': friendly,
-            'response': friendly
-        }), status_code
+        return jsonify({'success': False, 'error': str(e)}), 500

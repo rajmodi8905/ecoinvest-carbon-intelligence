@@ -225,6 +225,34 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/api/search/fast', methods=['GET'])
+def fast_rag_search():
+    """Use Hybrid Search (BM25 + FAISS) to search both news and projects"""
+    query = request.args.get('query', '')
+    if not query:
+        return jsonify({'success': False, 'error': 'Query required'}), 400
+        
+    try:
+        # Import dynamically to avoid circular dependencies
+        from services.news_rag_service import search_news
+        from services.projects_rag_service import search_projects
+        
+        # Parallel fetch could be added here, but sequential is fine for now 
+        # since individual latencies are sub-second
+        news_results = search_news(query, limit=3)
+        project_results = search_projects(query, limit=3)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'news': news_results,
+                'projects': project_results
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error in fast search: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # ============================================================================
 # ANALYTICS ENDPOINTS (Dashboard Overview)
 # ============================================================================

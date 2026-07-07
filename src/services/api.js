@@ -191,6 +191,11 @@ export const searchProjects = async (query, limit = 50) => {
   });
 };
 
+export const fastSearch = async (query) => {
+  if (!query) return { success: true, data: { news: [], projects: [] } };
+  return apiFetch(`/api/search/fast?query=${encodeURIComponent(query)}`);
+};
+
 // ============================================================================
 // FINANCE & ESG API
 // ============================================================================
@@ -356,6 +361,7 @@ export default {
   getProjectReport,
   askProjectQuestion,
   searchProjects,
+  fastSearch,
 
   // Finance & ESG
   getFinance,

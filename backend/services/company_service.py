@@ -7,6 +7,7 @@ Endpoints: GET /api/company/:ticker, GET /api/company/:ticker/insights, GET /api
 
 import os
 import logging
+import time
 from typing import Dict, List, Any, Optional
 from llm_manager import get_llm
 import markdown
@@ -384,54 +385,83 @@ Website: {comp.get('website', '')}
             except Exception as e:
                 return f"Error getting company info: {str(e)}"
         
-        # Create agent with all tools
-        tools = [search_news_rag, search_projects_rag, get_company_info]
-        if os.getenv('TAVILY_API_KEY'):
-            tools.append(TavilySearch(max_results=10))
+        logger.info(f"🤖 Fetching context for {name} in parallel...")
         
-        agent = create_react_agent(
-            model=llm,
-            tools=tools,
-            prompt="""You are a Sustainability and Market Impact Analyst AI Agent. You have four tools: (1) news RAG, (2) carbon-projects RAG, (3) internet search, (4) company info.
-
-For any company, use every tool multiple times. Always start with broad queries, not just the company name. Add sector and product keywords. Example: if the company is Tesla, also search “EV”, “electric vehicles”, “cars”, “battery manufacturing”, “autonomous driving”, “solar”, etc. Apply the same logic to any company based on its industry.
-
-Use the news RAG and carbon RAG with several wide queries covering sustainability, ESG, carbon credits, climate targets, regulatory exposure, controversies, and sector trends. Use internet search and company info to gather official filings, sustainability reports, and verified data.
-
-After collecting information, create a short report:
-
-1–2 sentence company overview
-
-How the company aligns with sustainability (verified actions only)
-
-Relevant government policies affecting it
-
-Important recent news and its impact
-
-How these factors may influence future stock price (mark as speculative)
-
-If data is missing or unverified, state that clearly. Keep the output concise."""
-        )
+        timings = {}
+        context_parts = []
+        comp = {}
         
-        # Invoke agent with company name
-        logger.info(f"🤖 Running future impact agent for {name}...")
-        result = agent.invoke({
-            "messages": [{"role": "user", "content": f"Analyze the sustainability and future impact of {name} ({ticker_symbol}) in the {industry} industry. Provide comprehensive analysis covering environmental impact, regulatory compliance, carbon footprint, green initiatives, and future growth projections."}]
-        })
+        import concurrent.futures
         
-        # Extract response - handle multimodal content
-        last_message = result["messages"][-1]
-        if hasattr(last_message, 'content'):
-            content = last_message.content
-            # If content is a list (multimodal), extract only text parts
-            if isinstance(content, list):
-                text_parts = [item.get('text', '') if isinstance(item, dict) else str(item) 
-                              for item in content if isinstance(item, dict) and item.get('type') == 'text']
-                analysis_text = ' '.join(text_parts).strip()
-            else:
-                analysis_text = str(content).strip()
+        def fetch_news():
+            t = time.time()
+            try:
+                res = search_news(f"{name} {industry} sustainability green", 3)
+                if res:
+                    return time.time() - t, "Recent News:\n" + "\n".join([n.get('title', '') for n in res])
+            except Exception as e:
+                logger.warning(f"Failed to fetch news context: {e}")
+            return time.time() - t, ""
+            
+        def fetch_proj():
+            t = time.time()
+            try:
+                res = search_projects(f"{industry} carbon offset", 3)
+                if res:
+                    return time.time() - t, "Related Projects:\n" + "\n".join([p.get('name', '') for p in res])
+            except Exception as e:
+                logger.warning(f"Failed to fetch project context: {e}")
+            return time.time() - t, ""
+            
+        def fetch_comp():
+            t = time.time()
+            try:
+                res = get_details(ticker)
+                if res and res.get('success'):
+                    return time.time() - t, res.get('data', {})
+            except Exception as e:
+                logger.warning(f"Failed to fetch company details: {e}")
+            return time.time() - t, {}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            future_news = executor.submit(fetch_news)
+            future_proj = executor.submit(fetch_proj)
+            future_comp = executor.submit(fetch_comp)
+            
+            timings['news_rag'], news_text = future_news.result()
+            if news_text: context_parts.append(news_text)
+            
+            timings['projects_rag'], proj_text = future_proj.result()
+            if proj_text: context_parts.append(proj_text)
+            
+            timings['finance_api'], comp = future_comp.result()
+            
+        # Also add company info
+        context_parts.append(f"Company: {name}\nIndustry: {industry}\nDescription: {comp.get('description', '')}")
+        full_context = "\n\n".join(context_parts)
+        
+        prompt = f"""You are a Sustainability Analyst AI. Based on the following context, generate a concise Executive Brief (100-150 words) covering:
+1. Company Overview
+2. Sustainability actions & Green initiatives
+3. Future Stock Impact (mark as speculative)
+
+Keep the output very concise and direct.
+
+CONTEXT:
+{full_context}"""
+
+        logger.info(f"🤖 Running fast single-pass LLM for {name}...")
+        
+        # Single LLM pass
+        t3 = time.time()
+        response = llm.invoke(prompt)
+        timings['llm_generation'] = time.time() - t3
+        
+        # Extract response
+        if hasattr(response, 'content'):
+            analysis_text = str(response.content).strip()
         else:
-            analysis_text = str(last_message)
+            analysis_text = str(response).strip()
         
         # Convert markdown to HTML for proper formatting
         analysis_html = markdown.markdown(analysis_text, extensions=['nl2br', 'sane_lists'])
@@ -446,7 +476,8 @@ If data is missing or unverified, state that clearly. Keep the output concise.""
             'data': {
                 'ticker': ticker,
                 'company_name': name,
-                'analysis': analysis_html
+                'analysis': analysis_html,
+                'timings': timings
             }
         }
     

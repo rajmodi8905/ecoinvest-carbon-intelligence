@@ -130,15 +130,22 @@ class ProjectReportService:
             ai_report = None
             llm = get_llm()
             
+            timings = {}
+            import time
+            
             if llm:
                 try:
                     logger.info(f"🤖 Generating AI report for {project_id}...")
                     prompt = self._create_report_prompt(project)
+                    
+                    t0 = time.time()
                     response = llm.invoke(prompt)
+                    timings['llm_generation'] = time.time() - t0
+                    
                     ai_report_markdown = response.content
                     # Convert markdown to HTML for proper formatting
                     ai_report = markdown.markdown(ai_report_markdown, extensions=['nl2br', 'sane_lists'])
-                    logger.info(f"✅ AI report generated for {project_id}")
+                    logger.info(f"✅ AI report generated for {project_id} in {timings['llm_generation']:.2f}s")
                     
                     # Save to cache
                     set_cached_insight('project', project_id, 'report', ai_report)
@@ -152,7 +159,8 @@ class ProjectReportService:
                 'success': True,
                 'data': {
                     'report': ai_report,
-                    'generated': ai_report is not None
+                    'generated': ai_report is not None,
+                    'timings': timings
                 }
             }
             
@@ -282,27 +290,15 @@ Your report should include:
    - Project overview and main impact
    - Key achievement or unique selling point
 
-2. **Project Description** (2-3 detailed paragraphs)
-   - Methodology and technical approach
-   - Location specifics and environmental context
-   - Scale of operation and implementation details
+2. **Project Description**
+   - Methodology and environmental context
+   - Scale of operation
 
-3. **Environmental Impact**
-   - Carbon reduction/sequestration metrics
-   - Co-benefits: biodiversity, water quality, soil health, community benefits
-   - Long-term sustainability
+3. **Key Metrics**
+   - Carbon reduction/sequestration
+   - Available credits and price
 
-4. **Key Metrics & Verification**
-   - Available credits and vintage year
-   - Registry status and certification
-   - Price analysis and market positioning
-
-5. **Investment Analysis**
-   - Why this project is attractive
-   - Risk factors and considerations
-   - Quality indicators
-
-Make the report professional, detailed (500-800 words), and data-driven. Use markdown formatting.
+Keep the report concise, professional, and data-driven. Output should be an Executive Brief of 100-150 words. Use markdown formatting.
 DO NOT make up numbers - use only the provided data."""
         
         return f"""{system_instructions}

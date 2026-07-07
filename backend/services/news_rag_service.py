@@ -66,32 +66,45 @@ class NewsRAGService:
         self._stop_watching = False
         self.indexed_ids = set()
         
+        self.bm25 = None
+        self.bm25_docs = []
+        
         if not LANGCHAIN_AVAILABLE:
             logger.error("❌ LangChain packages not available")
             return
         
-        # Initialize embeddings model
-        print("📥 Loading HuggingFace embedding model...")
-        logger.info("🚀 Loading embedding model...")
-        
-        import torch
-        # Prevent meta tensor initialization issues
-        torch.set_default_dtype(torch.float32)
-        
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={
-                'device': 'cpu',
-                'trust_remote_code': False
-            },
-            encode_kwargs={
-                'normalize_embeddings': True,
-                'batch_size': 32
-            },
-            cache_folder=None,  # Use default HuggingFace cache
-            multi_process=False
-        )
-        print("   ✓ Embedding model loaded: sentence-transformers/all-MiniLM-L6-v2")
+        import os
+        if os.environ.get("LLM_MODE") == "ollama":
+            print("📥 Loading Ollama embedding model (nomic-embed-text)...")
+            logger.info("🚀 Loading Ollama embedding model...")
+            from langchain_community.embeddings import OllamaEmbeddings
+            self.embeddings = OllamaEmbeddings(
+                model="nomic-embed-text",
+                base_url=os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+            )
+            print("   ✓ Ollama embedding model loaded")
+        else:
+            print("📥 Loading HuggingFace embedding model...")
+            logger.info("🚀 Loading embedding model...")
+            
+            import torch
+            # Prevent meta tensor initialization issues
+            torch.set_default_dtype(torch.float32)
+            
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2",
+                model_kwargs={
+                    'device': 'cpu',
+                    'trust_remote_code': False
+                },
+                encode_kwargs={
+                    'normalize_embeddings': True,
+                    'batch_size': 32
+                },
+                cache_folder=None,  # Use default HuggingFace cache
+                multi_process=False
+            )
+            print("   ✓ Embedding model loaded: sentence-transformers/all-MiniLM-L6-v2")
         logger.info("✅ Embedding model loaded")
         
         # Text splitter for chunking
@@ -107,11 +120,32 @@ class NewsRAGService:
         
         print("🔍 Checking for existing vector store...")
         self._initialize_vector_store()
+        self._rebuild_bm25()
         print("=" * 70 + "\n")
     
     # ============================================================================
     # HELPER FUNCTIONS
     # ============================================================================
+    
+    def _rebuild_bm25(self):
+        """Rebuilds the BM25 index from the FAISS docstore."""
+        if not self.vector_store: return
+        import time
+        start = time.time()
+        try:
+            from rank_bm25 import BM25Okapi
+            # FAISS docstore
+            docs = list(self.vector_store.docstore._dict.values())
+            self.bm25_docs = docs
+            tokenized_corpus = [doc.page_content.lower().split() for doc in docs]
+            if tokenized_corpus:
+                self.bm25 = BM25Okapi(tokenized_corpus)
+                logger.info(f"⚡ Rebuilt BM25 index for {len(docs)} documents in {time.time()-start:.3f}s")
+            else:
+                self.bm25 = None
+        except ImportError:
+            logger.warning("rank_bm25 not installed, hybrid search unavailable")
+            self.bm25 = None
     
     def _load_indexed_ids(self):
         """Load the set of already indexed article IDs."""
@@ -281,8 +315,18 @@ class NewsRAGService:
             
             print(f"🤖 Step 3/5: Generating embeddings and building FAISS index...")
             print(f"   (This may take a few minutes for {len(documents)} chunks...)")
-            # Create FAISS vector store
-            self.vector_store = FAISS.from_documents(documents, self.embeddings)
+            # Create FAISS vector store in batches to prevent OOM
+            self.vector_store = None
+            batch_size = 100
+            total_batches = (len(documents) - 1) // batch_size + 1
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i+batch_size]
+                if self.vector_store is None:
+                    self.vector_store = FAISS.from_documents(batch, self.embeddings)
+                else:
+                    self.vector_store.add_documents(batch)
+                if (i // batch_size + 1) % 5 == 0 or (i // batch_size + 1) == total_batches:
+                    print(f"   ✓ Embedded batch {i//batch_size + 1}/{total_batches}")
             print(f"   ✓ FAISS index built successfully")
             
             print(f"💾 Step 4/5: Saving vector store to disk...")
@@ -343,10 +387,10 @@ class NewsRAGService:
             print(f"   ✓ Updated indexed IDs")
             
             print("-" * 70)
-            print(f"✅ UPDATE COMPLETE: Added {len(documents)} chunks from {len(new_articles)} articles")
-            print(f"   Total indexed articles: {len(self.indexed_ids)}")
-            print("-" * 70)
             logger.info(f"✅ Added {len(documents)} new chunks from {len(new_articles)} articles")
+            
+            # Rebuild BM25 to include new documents
+            self._rebuild_bm25()
     
     def _check_and_update(self):
         """Background task: check for new articles and add them incrementally."""
@@ -399,10 +443,48 @@ class NewsRAGService:
             logger.warning("⚠️ Vector store not initialized")
             return []
         
-        # Perform similarity search
-        results = self.vector_store.similarity_search_with_score(query, k=k)
+        # 1. FAISS Search
+        faiss_results = self.vector_store.similarity_search_with_score(query, k=k*3)
         
-        logger.info(f"🔍 News RAG Search '{query}': found {len(results)} chunks")
+        # 2. BM25 Search
+        bm25_results = []
+        if self.bm25 and self.bm25_docs:
+            tokenized_query = query.lower().split()
+            bm25_scores = self.bm25.get_scores(tokenized_query)
+            import numpy as np
+            top_n = np.argsort(bm25_scores)[::-1][:k*3]
+            bm25_results = [(self.bm25_docs[i], bm25_scores[i]) for i in top_n if bm25_scores[i] > 0]
+            
+        # 3. RRF Fusion
+        if not bm25_results:
+            results = faiss_results[:k]
+        else:
+            RRF_K = 60
+            fused_scores = {}
+            doc_map = {}
+            
+            faiss_results_sorted = sorted(faiss_results, key=lambda x: x[1])
+            for rank, (doc, score) in enumerate(faiss_results_sorted):
+                doc_id = doc.metadata.get('chunk_index', str(hash(doc.page_content)))
+                key = f"{doc.metadata.get('article_id', 'unknown')}_{doc_id}"
+                if key not in fused_scores:
+                    fused_scores[key] = 0
+                    doc_map[key] = doc
+                fused_scores[key] += 1 / (RRF_K + rank + 1)
+                
+            bm25_results_sorted = sorted(bm25_results, key=lambda x: x[1], reverse=True)
+            for rank, (doc, score) in enumerate(bm25_results_sorted):
+                doc_id = doc.metadata.get('chunk_index', str(hash(doc.page_content)))
+                key = f"{doc.metadata.get('article_id', 'unknown')}_{doc_id}"
+                if key not in fused_scores:
+                    fused_scores[key] = 0
+                    doc_map[key] = doc
+                fused_scores[key] += 1 / (RRF_K + rank + 1)
+                
+            sorted_fused = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+            results = [(doc_map[key], score) for key, score in sorted_fused[:k]]
+        
+        logger.info(f"🔍 News Hybrid RAG Search '{query}': found {len(results)} chunks")
         
         # Format results
         chunks = []
