@@ -10,6 +10,9 @@ from collections import defaultdict
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,9 +45,72 @@ class PathwayDataReader:
         }
         self._cache_ttl = 2  # Cache for 2 seconds minimum (to avoid thrashing)
         
+        self.socketio = None
+        
         logger.info(f"✅ Pathway reader initialized: {pathway_output_dir}")
         if self.use_db:
             logger.info(f"✅ Direct database connection enabled: {self.db_config['host']}")
+            
+        self._setup_watchdog()
+        
+    def set_socketio(self, socketio):
+        """Set the SocketIO instance to emit latency updates"""
+        self.socketio = socketio
+        
+    def _setup_watchdog(self):
+        """Setup OS-level file watcher using watchdog"""
+        class PathwayEventHandler(FileSystemEventHandler):
+            def __init__(self, reader):
+                self.reader = reader
+                
+            def on_modified(self, event):
+                if not event.is_directory and event.src_path.endswith('.jsonl'):
+                    self.reader._handle_file_change(event.src_path)
+                    
+        try:
+            self.observer = Observer()
+            handler = PathwayEventHandler(self)
+            # Make sure directory exists
+            os.makedirs(self.output_dir, exist_ok=True)
+            self.observer.schedule(handler, self.output_dir, recursive=False)
+            self.observer.start()
+            logger.info(f"👀 Watchdog monitoring {self.output_dir} for changes")
+        except Exception as e:
+            logger.error(f"Failed to start watchdog: {e}")
+            
+    def _handle_file_change(self, filepath: str):
+        """Process a file change event and emit latency"""
+        filename = os.path.basename(filepath)
+        
+        # Determine cache key
+        cache_key = None
+        if filename == 'finance.jsonl': cache_key = 'finance'
+        elif filename == 'news.jsonl': cache_key = 'news'
+        elif filename == 'projects.jsonl': cache_key = 'projects'
+        
+        if cache_key:
+            # Refresh cache immediately
+            self._cache[cache_key]['file_mtime'] = os.path.getmtime(filepath)
+            
+            # Read the latest record to compute latency
+            records = self._read_jsonl_file(filepath, max_records=5)
+            if records and self.socketio:
+                latest = records[-1]
+                # Look for a timestamp from the scraper
+                scraper_ts = latest.get('timestamp') or latest.get('time')
+                if scraper_ts:
+                    # Convert to seconds if in ms
+                    if scraper_ts > 10000000000: 
+                        scraper_ts = scraper_ts / 1000.0
+                        
+                    latency_ms = (time.time() - scraper_ts) * 1000
+                    
+                    # Prevent negative latency from clock skew
+                    if latency_ms >= 0:
+                        self.socketio.emit('latency_update', {
+                            'source': cache_key,
+                            'latency_ms': round(latency_ms, 2)
+                        })
     
     def _test_db_connection(self) -> bool:
         """Test if database connection is available"""

@@ -6,6 +6,8 @@ KAFKA_SETTINGS = {
     "bootstrap.servers": KAFKA_SERVERS,
     "group.id": "carbon_pathway_consumer_v2",
     "auto.offset.reset": "earliest",
+    "fetch.wait.max.ms": "10",
+    "linger.ms": "5",
 }
 
 
@@ -24,7 +26,7 @@ def build_pipeline():
         topic="carbon.public.verra",
         format="json",
         schema=DebeziumMessageSchema,
-        autocommit_duration_ms=1000,
+        autocommit_duration_ms=100,
     )
 
     carbon_raw = pw.io.kafka.read(
@@ -32,7 +34,7 @@ def build_pipeline():
         topic="carbon.public.carbonmark",
         format="json",
         schema=DebeziumMessageSchema,
-        autocommit_duration_ms=1000,
+        autocommit_duration_ms=100,
     )
 
     finance_raw = pw.io.kafka.read(
@@ -40,7 +42,7 @@ def build_pipeline():
         topic="carbon.public.finance",
         format="json",
         schema=DebeziumMessageSchema,
-        autocommit_duration_ms=1000,
+        autocommit_duration_ms=100,
     )
 
     news_raw = pw.io.kafka.read(
@@ -48,7 +50,7 @@ def build_pipeline():
         topic="carbon.public.news",
         format="json",
         schema=DebeziumMessageSchema,
-        autocommit_duration_ms=1000,
+        autocommit_duration_ms=100,
     )
 
     # Filter out DELETE events (where payload.after is null) and extract fields

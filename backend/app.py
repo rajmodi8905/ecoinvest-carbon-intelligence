@@ -71,6 +71,7 @@ frontend_actions.set_socketio(socketio)
 logger.info("🚀 Initializing Pathway Data Reader...")
 pathway_output_dir = os.getenv('PATHWAY_OUTPUT_DIR', './carbon-intelligence/server/output')
 pathway_reader = PathwayDataReader(pathway_output_dir=pathway_output_dir)
+pathway_reader.set_socketio(socketio)
 
 # Initialize modular services - each service corresponds to a frontend feature
 logger.info("📦 Initializing Modular Services...")

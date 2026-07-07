@@ -692,8 +692,8 @@ const Dashboard = () => {
             </div>
           )}
 
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
-            <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_384px] gap-8 min-h-[calc(100vh-8rem)]">
+          <div className="w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+            <div className="grid grid-cols-1 lg:grid-cols-[30%_40%_30%] 2xl:grid-cols-[32%_36%_32%] gap-6 lg:gap-8 min-h-[calc(100vh-8rem)]">
               {/* Left Column - Chat Sidebar */}
               <DashboardChatSidebar />
 

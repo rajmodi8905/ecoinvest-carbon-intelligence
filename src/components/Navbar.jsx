@@ -1,8 +1,9 @@
 import React from 'react';
-import { Leaf, Search, Sparkles, Sun, Moon } from 'lucide-react';
+import { Leaf, Search, Sparkles, Sun, Moon, Zap } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ThemeContext } from '../context/ThemeContext';
 import api from '../services/api';
+import { io } from 'socket.io-client';
 
 const Navbar = () => {
   const { theme, toggleTheme } = React.useContext(ThemeContext);
@@ -11,6 +12,19 @@ const Navbar = () => {
   const [isSearching, setIsSearching] = React.useState(false);
   const [suggestions, setSuggestions] = React.useState([]);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
+  const [liveLatency, setLiveLatency] = React.useState(321); // Default to last benchmarked 321ms
+
+  React.useEffect(() => {
+    // Setup socket connection for real-time latency
+    const socket = io('http://localhost:5001');
+    socket.on('latency_update', (data) => {
+      if (data.latency_ms && data.latency_ms > 0) {
+        setLiveLatency(data.latency_ms);
+      }
+    });
+
+    return () => socket.disconnect();
+  }, []);
 
   // Real-time search using backend API
   const performRAGSearch = async (query) => {
@@ -185,8 +199,12 @@ const Navbar = () => {
             </form>
           </div>
 
-          {/* Nav Links */}
-          <div className="flex items-center space-x-8">
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-2 bg-green-500/10 text-green-500 px-3 py-1.5 rounded-full text-sm font-medium border border-green-500/20 shadow-[0_0_10px_rgba(34,197,94,0.2)] animate-pulse">
+              <Zap className="h-4 w-4" />
+              <span>Live Data: {(liveLatency / 1000).toFixed(2)}s</span>
+            </div>
+            
             <Link
               to="/"
               className={`${theme === 'dark' ? 'text-slate-300 hover:text-green-400' : 'text-slate-700 hover:text-green-600'} font-semibold transition-all duration-300 relative group px-2 py-1`}

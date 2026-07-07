@@ -119,7 +119,7 @@ const DashboardChatSidebar = () => {
   };
 
   return (
-    <aside className="hidden lg:block w-80">
+    <aside className="hidden lg:block w-full">
       <div
         className={`${
           theme === "dark"

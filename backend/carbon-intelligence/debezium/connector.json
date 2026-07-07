@@ -14,6 +14,8 @@
 
     "publication.autocreate.mode": "all_tables",
     "schema.include.list": "public",
-    "table.include.list": "public.verra,public.carbonmark,public.finance,public.news"
+    "table.include.list": "public.verra,public.carbonmark,public.finance,public.news",
+    "snapshot.mode": "never",
+    "heartbeat.interval.ms": "100"
   }
 }
