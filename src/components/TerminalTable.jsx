@@ -75,7 +75,7 @@ const TerminalTable = ({
             key={col.key}
             onClick={col.sortable !== false ? () => handleSort(col.key) : undefined}
             style={{
-              textAlign: col.align || 'left',
+              justifyContent: col.align === 'right' ? 'flex-end' : col.align === 'center' ? 'center' : 'flex-start',
               cursor: col.sortable !== false ? 'pointer' : 'default',
               display: 'flex',
               alignItems: 'center',

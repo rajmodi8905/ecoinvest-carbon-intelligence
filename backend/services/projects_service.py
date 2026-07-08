@@ -102,14 +102,29 @@ class ProjectsService:
                 
                 logger.info(f"📋 Extracted {len(project_ids)} unique project IDs: {list(project_ids)[:5]}...")
                 
-                # Get full project data for matched IDs
-                all_projects = self.pathway_reader.get_projects(limit=1000)
+                # Get full project data specifically for the matched IDs
+                all_projects = self.pathway_reader.get_projects_by_ids(list(project_ids))
                 
-                # Match by project_id field in pathway reader data
-                matched_projects = [
-                    p for p in all_projects 
-                    if p.get('project_id') in project_ids or p.get('id') in project_ids
-                ]
+                # Create a lookup map for fast project access
+                project_map = {}
+                for p in all_projects:
+                    pid = p.get('project_id') or p.get('id')
+                    if pid:
+                        project_map[pid] = p
+                        
+                # Match projects strictly in the order returned by RAG (relevance)
+                matched_projects = []
+                seen_ids = set()
+                
+                for chunk in rag_results:
+                    project_id = (
+                        chunk.get('id') or 
+                        chunk.get('metadata', {}).get('id') or
+                        chunk.get('metadata', {}).get('project_id')
+                    )
+                    if project_id and project_id not in seen_ids and project_id in project_map:
+                        seen_ids.add(project_id)
+                        matched_projects.append(project_map[project_id])
                 
                 logger.info(f"✅ Matched {len(matched_projects)} full projects from pathway reader")
                 

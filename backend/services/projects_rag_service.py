@@ -71,8 +71,6 @@ class ProjectsRAGService:
             logger.error("❌ LangChain packages not available")
             return
         
-        import os
-        import os
         import torch
         torch.set_default_dtype(torch.float32)
 
@@ -495,7 +493,8 @@ class ProjectsRAGService:
                 if key not in fused_scores:
                     fused_scores[key] = 0
                     doc_map[key] = doc
-                fused_scores[key] += 1 / (RRF_K + rank + 1)
+                # Give FAISS a weight of 1.0
+                fused_scores[key] += 1.0 / (RRF_K + rank + 1)
                 
             bm25_results_sorted = sorted(bm25_results, key=lambda x: x[1], reverse=True)
             for rank, (doc, score) in enumerate(bm25_results_sorted):
@@ -504,9 +503,17 @@ class ProjectsRAGService:
                 if key not in fused_scores:
                     fused_scores[key] = 0
                     doc_map[key] = doc
-                fused_scores[key] += 1 / (RRF_K + rank + 1)
+                # Give BM25 a 2.5x weight multiplier so exact keyword matches dominate
+                fused_scores[key] += 2.5 / (RRF_K + rank + 1)
                 
             sorted_fused = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+            
+            # Dynamic Thresholding: drop results with a score less than 40% of the top score
+            if sorted_fused:
+                max_score = sorted_fused[0][1]
+                threshold = max_score * 0.4
+                sorted_fused = [item for item in sorted_fused if item[1] >= threshold]
+                
             results = [(doc_map[key], score) for key, score in sorted_fused[:k]]
         
         logger.info(f"🔍 Projects Hybrid RAG Search '{query}': found {len(results)} chunks")

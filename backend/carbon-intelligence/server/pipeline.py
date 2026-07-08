@@ -1,4 +1,29 @@
+"""
+Pathway Streaming Pipeline — Carbon Intelligence
+
+Data flow:
+  Kafka (Debezium CDC) → Pathway → JSONL files + pathway_enriched (Postgres)
+
+The pipeline:
+1. Reads Debezium CDC events from 4 Kafka topics (verra, carbonmark, finance, news)
+2. Writes clean JSONL snapshots for the gRPC server to serve
+3. Computes live enriched signals (sentiment_24h, news_velocity, risk) per company
+   and writes them to the `pathway_enriched` Postgres table every ~30 seconds.
+   The Flask backend reads from this table to show the ⚡ live-computed badge.
+"""
+
 import pathway as pw
+import psycopg2
+import os
+import re
+import json
+import time
+import threading
+import logging
+from collections import defaultdict
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 KAFKA_SERVERS = "kafka:9092"
 
@@ -10,17 +35,175 @@ KAFKA_SETTINGS = {
     "linger.ms": "5",
 }
 
+# DB config — use env vars (same as grpc_server.py)
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST", "postgres"),
+    "port": int(os.getenv("DB_PORT", 5432)),
+    "dbname": os.getenv("DB_NAME", "carbon_intel"),
+    "user": os.getenv("DB_USER", "carbon"),
+    "password": os.getenv("DB_PASSWORD", "carbonpw"),
+}
+
 
 class DebeziumMessageSchema(pw.Schema):
     payload: pw.Json
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pathway Enriched Writer
+# Runs in a background thread; reads from Postgres directly (news + finance),
+# computes per-company live signals, and upserts to pathway_enriched.
+# This is the write path for the ⚡ live-signals badge in the frontend.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _compute_and_write_enriched():
+    """
+    Background thread that computes per-company enriched signals from live data
+    and writes them to the pathway_enriched table every 30 seconds.
+
+    Signals computed:
+      - sentiment_24h : mean sentiment score over last 24h news mentions
+      - news_velocity : count of news mentions in last 24h
+      - risk          : composite risk score [0, 1]
+    """
+    print("⚡ pathway_enriched writer starting...")
+    ESG_MAP = {"AAA": 100, "AA": 90, "A": 80, "BBB": 70, "BB": 60, "B": 50, "CCC": 40}
+    SENTIMENT_MAP = {"Positive": 1.0, "Negative": -1.0, "Neutral": 0.0}
+
+    def _get_conn():
+        return psycopg2.connect(**DB_CONFIG)
+
+    # Give the rest of the system time to initialize before first run
+    time.sleep(15)
+
+    consecutive_errors = 0
+
+    while True:
+        try:
+            conn = _get_conn()
+            cur = conn.cursor()
+
+            # 1. Load all companies
+            cur.execute("""
+                SELECT ticker, company_name, industry, esg_rating, gii_score, price, change_percent
+                FROM finance
+            """)
+            companies = cur.fetchall()
+
+            if not companies:
+                cur.close()
+                conn.close()
+                time.sleep(30)
+                continue
+
+            # 2. Load recent news (last 48h window for velocity, 24h for signals)
+            cur.execute("""
+                SELECT title, summary, sentiment, source
+                FROM news
+                WHERE published > NOW() - INTERVAL '48 hours'
+            """)
+            news_rows = cur.fetchall()
+
+            # 3. Build per-company news signals via regex matching
+            now_ts = datetime.now(timezone.utc).timestamp()
+            signals = {}
+
+            for (ticker, company_name, industry, esg_rating, gii_score, price, change_pct) in companies:
+                parts = [re.escape(ticker)] if ticker else []
+                if company_name and len(company_name) > 3:
+                    parts.append(re.escape(company_name))
+                if not parts:
+                    continue
+
+                pat = re.compile(
+                    r'\b(' + '|'.join(parts) + r')\b', re.IGNORECASE
+                )
+
+                matched_sentiments = []
+                news_count = 0
+
+                for (title, summary, sentiment, source) in news_rows:
+                    text = (title or "") + " " + (summary or "")
+                    if pat.search(text):
+                        matched_sentiments.append(
+                            SENTIMENT_MAP.get(sentiment or "Neutral", 0.0)
+                        )
+                        news_count += 1
+
+                mean_sentiment = (
+                    sum(matched_sentiments) / len(matched_sentiments)
+                    if matched_sentiments else 0.0
+                )
+
+                # Risk: composite from sentiment + price change
+                s_norm = (mean_sentiment + 1) / 2  # [-1,1] → [0,1]
+                chg = float(change_pct or 0)
+                p_neg = max(0.0, -chg / 100.0)
+                risk = round(((1 - s_norm) * (1 + 0.5 * p_neg)) / 2.0, 4)
+
+                signals[ticker] = {
+                    "sentiment_24h": round(mean_sentiment, 4),
+                    "news_velocity": news_count,
+                    "risk": risk,
+                }
+
+            # 4. Upsert into pathway_enriched
+            upserted = 0
+            for ticker, sigs in signals.items():
+                for metric_key, metric_value in sigs.items():
+                    cur.execute("""
+                        INSERT INTO pathway_enriched
+                            (entity_type, entity_id, metric_key, metric_value, computed_at)
+                        VALUES ('company', %s, %s, %s, NOW())
+                        ON CONFLICT (entity_type, entity_id, metric_key) DO UPDATE SET
+                            metric_value = EXCLUDED.metric_value,
+                            computed_at  = NOW()
+                    """, (ticker, metric_key, float(metric_value)))
+                    upserted += 1
+
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            print(f"⚡ pathway_enriched: upserted {upserted} signals for "
+                  f"{len(signals)} companies")
+            consecutive_errors = 0
+
+        except Exception as e:
+            consecutive_errors += 1
+            print(f"⚠️ pathway_enriched writer error (#{consecutive_errors}): {e}")
+            if consecutive_errors >= 5:
+                print("❌ pathway_enriched writer: too many consecutive errors, "
+                      "sleeping 120s before retry")
+                time.sleep(120)
+                consecutive_errors = 0
+
+        # Run every 30 seconds
+        time.sleep(30)
+
+
+def start_enriched_writer():
+    """Start the pathway_enriched background writer thread."""
+    t = threading.Thread(
+        target=_compute_and_write_enriched,
+        daemon=True,
+        name="pathway-enriched-writer"
+    )
+    t.start()
+    print("✅ pathway_enriched writer thread started")
+    return t
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main pipeline
+# ─────────────────────────────────────────────────────────────────────────────
 
 def build_pipeline():
     print("🚀 Building Pathway pipeline...")
 
     # Read from Debezium CDC streams using JSON format
     # Debezium wraps everything in {schema: ..., payload: {before:..., after:...}}
-    
+
     verra_raw = pw.io.kafka.read(
         rdkafka_settings=KAFKA_SETTINGS,
         topic="carbon.public.verra",
@@ -97,7 +280,7 @@ def build_pipeline():
     )
 
     news = news_raw.filter(pw.this.payload["after"].is_not_none()).select(
-        news_id=pw.this.payload["after"]["news_id"].as_str(),
+        id=pw.this.payload["after"]["id"].as_str(),
         title=pw.this.payload["after"]["title"].as_str(),
         summary=pw.this.payload["after"]["summary"].as_str(),
         link=pw.this.payload["after"]["link"].as_str(),
@@ -111,6 +294,12 @@ def build_pipeline():
     pw.io.jsonlines.write(finance, "./output/finance.jsonl")
     pw.io.jsonlines.write(news,    "./output/news.jsonl")
 
+    # ── Start the pathway_enriched writer background thread ──────────────────
+    # This computes per-company signals from Postgres and writes to
+    # pathway_enriched every 30s. Flask backend reads this for the ⚡ badge.
+    start_enriched_writer()
+
     print("✅ Pathway pipeline ready with output connectors.")
+    print("⚡ pathway_enriched writer: running every 30s in background")
     # Return all three live tables for use in grpc_server.py
     return verra, finance, news

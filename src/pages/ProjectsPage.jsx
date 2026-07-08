@@ -6,14 +6,7 @@ import * as api from '../services/api';
 
 const fmtPrice = v => v ? `$${parseFloat(v).toFixed(4)}` : null;
 
-const STATUS_CELL = (val, row) => {
-  const traded = (row.listing_count > 0) || (parseFloat(row.amount || 0) > 0);
-  return (
-    <span className={`badge ${traded ? 'badge-green' : 'badge-muted'}`}>
-      {traded ? 'Traded' : 'Registry'}
-    </span>
-  );
-};
+
 
 const COLS = [
   { key: 'project_name',    label: 'PROJECT',   width: '2fr',  sortable: false,
@@ -26,10 +19,6 @@ const COLS = [
     render: v => <span className="mono pos">{fmtPrice(v) || '—'}</span> },
   { key: 'available_credits',label: 'SUPPLY',   width: 90,  align: 'right', sortable: true,
     render: v => <span className="mono">{v ? Number(v).toLocaleString() : '—'}</span> },
-  { key: 'vintage',         label: 'VINTAGE',   width: 70,  align: 'right', sortable: true,
-    render: v => <span className="mono">{v || '—'}</span> },
-  { key: 'registry_status', label: 'STATUS',    width: 80,  sortable: true,
-    render: STATUS_CELL },
 ];
 
 const ProjectsPage = () => {
@@ -37,14 +26,27 @@ const ProjectsPage = () => {
   const [all, setAll] = React.useState([]);
   const [search, setSearch] = React.useState('');
   const [category, setCategory] = React.useState('All');
-  const [filter, setFilter] = React.useState('All');
   const [loading, setLoading] = React.useState(true);
 
+  const [debouncedSearch, setDebouncedSearch] = React.useState('');
+
   React.useEffect(() => {
-    api.getProjects({ limit: 5000 })
-      .then(d => { setAll(Array.isArray(d) ? d : d?.data || []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
+    const timer = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  React.useEffect(() => {
+    setLoading(true);
+    if (debouncedSearch) {
+      api.searchProjects(debouncedSearch, 100)
+        .then(d => { setAll(Array.isArray(d) ? d : d?.data || []); setLoading(false); })
+        .catch(() => setLoading(false));
+    } else {
+      api.getProjects({ limit: 5000 })
+        .then(d => { setAll(Array.isArray(d) ? d : d?.data || []); setLoading(false); })
+        .catch(() => setLoading(false));
+    }
+  }, [debouncedSearch]);
 
   const categories = React.useMemo(() => {
     const s = new Set(all.map(p => p.category).filter(Boolean));
@@ -54,25 +56,14 @@ const ProjectsPage = () => {
   const filtered = React.useMemo(() => {
     let list = all;
     if (category !== 'All') list = list.filter(p => p.category === category);
-    if (filter === 'Traded') list = list.filter(p => parseFloat(p.price || 0) > 0);
-    if (search) {
-      const q = search.toLowerCase();
-      list = list.filter(p =>
-        p.project_name?.toLowerCase().includes(q) ||
-        p.project_id?.toLowerCase().includes(q) ||
-        p.country?.toLowerCase().includes(q)
-      );
-    }
     return list;
-  }, [all, category, filter, search]);
-
-  const traded = all.filter(p => parseFloat(p.price || 0) > 0).length;
+  }, [all, category]);
 
   return (
     <div style={{ background: 'var(--bg)', minHeight: '100%' }}>
       <div className="page-header">
         <h1>Carbon Projects</h1>
-        <p>{all.length.toLocaleString()} Verra VCS projects · {traded} traded on Carbonmark — click any for its AI report</p>
+        <p>{all.length.toLocaleString()} verified climate projects actively trading on Carbonmark — click any for its AI report</p>
       </div>
       <div className="page-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div className="panel">
@@ -82,21 +73,12 @@ const ProjectsPage = () => {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search name, VCS ID, or country..."
+                placeholder="Semantic search (e.g. reforestation in Asia)..."
               />
             </div>
             <select className="terminal-select" value={category} onChange={e => setCategory(e.target.value)}>
               {categories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            {['All','Traded'].map(f => (
-              <button key={f} onClick={() => setFilter(f)} style={{
-                padding: '4px 10px', fontSize: '11px', borderRadius: 'var(--radius-sm)',
-                border: `1px solid ${filter===f?'var(--green)':'var(--border)'}`,
-                background: filter===f?'var(--green-dim)':'none',
-                color: filter===f?'var(--green)':'var(--text-muted)',
-                cursor: 'pointer', transition: 'all 120ms',
-              }}>{f}</button>
-            ))}
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
               {filtered.length.toLocaleString()} projects
             </span>
@@ -105,10 +87,11 @@ const ProjectsPage = () => {
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Loading projects...</div>
           ) : (
             <TerminalTable
+              key={debouncedSearch}
               columns={COLS}
               data={filtered}
-              defaultSort="price"
-              defaultDir="desc"
+              defaultSort={debouncedSearch ? null : "category"}
+              defaultDir="asc"
               onRowClick={row => navigate(`/report/${row.project_id || row.id}`)}
               maxHeight="calc(100vh - 260px)"
               emptyMessage={search || category !== 'All' ? 'No projects match your filters' : 'No project data available'}

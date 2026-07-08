@@ -1,5 +1,6 @@
 import psycopg2
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -7,11 +8,11 @@ logger = logging.getLogger(__name__)
 def get_db_connection():
     try:
         return psycopg2.connect(
-            dbname="carbon_intel",
-            user="carbon",
-            password="carbonpw",
-            host="postgres",
-            port=5432
+            dbname=os.getenv("DB_NAME", "carbon_intel"),
+            user=os.getenv("DB_USER", "carbon"),
+            password=os.getenv("DB_PASSWORD", "carbonpw"),
+            host=os.getenv("DB_HOST", "postgres"),
+            port=int(os.getenv("DB_PORT", 5432))
         )
     except Exception as e:
         logger.error(f"Error connecting to DB for cache: {e}")

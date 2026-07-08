@@ -1,6 +1,7 @@
 import React from 'react';
 import { useParams, Link } from 'react-router-dom';
 import * as api from '../services/api';
+import { API_BASE_URL } from '../services/api';
 import StatCard from '../components/StatCard';
 import SentimentBadge from '../components/SentimentBadge';
 import AgentTracePanel from '../components/AgentTracePanel';
@@ -9,6 +10,8 @@ import ImpactTranslator from '../components/ImpactTranslator';
 import ReactMarkdown from 'react-markdown';
 import RealtimeChart from '../components/RealtimeChart';
 import ImpactDashboard from '../components/ImpactDashboard';
+
+import { fmtTickerPrice, fmtUSDPrice } from '../utils/currency';
 
 const fmtPrice = v => v ? `$${parseFloat(v).toFixed(2)}` : '—';
 const fmtChg   = v => { const n = parseFloat(v); return <span className={`mono ${n>=0?'pos':'neg'}`}>{n>=0?'+':''}{n.toFixed(2)}%</span>; };
@@ -65,7 +68,7 @@ const ReportPage = () => {
         const comp = res.data;
         
         // Enrich with analytics data
-        fetch('http://localhost:5001/api/analytics/top-movers')
+        fetch(`${API_BASE_URL}/api/analytics/top-movers`)
           .then(r => r.json())
           .then(mv => {
             const enriched = mv.companies?.find(c => c.ticker === comp.ticker);
@@ -78,7 +81,7 @@ const ReportPage = () => {
             setNews(fs.data.news);
           } else if (comp.industry) {
             // Fallback to industry news
-            fetch(`http://localhost:5001/api/news?limit=10`).then(r => r.json()).then(indNews => {
+            fetch(`${API_BASE_URL}/api/news?limit=10`).then(r => r.json()).then(indNews => {
               // Optionally filter by industry keyword if backend doesn't support it, but for now just show top news
               setNews(indNews.data || []);
             }).catch(() => {});
@@ -87,7 +90,7 @@ const ReportPage = () => {
         });
         
         // Fetch themes
-        fetch('http://localhost:5001/api/analytics/macro-themes')
+        fetch(`${API_BASE_URL}/api/analytics/macro-themes`)
           .then(r => r.json())
           .then(th => setThemes(th.themes?.slice(0,3).map(t=>t.theme) || []));
           
@@ -137,12 +140,12 @@ const ReportPage = () => {
           </div>
           {isProject ? (
             <div style={{ textAlign: 'right' }}>
-              <div className="mono pos" style={{ fontSize: 24, fontWeight: 600 }}>${data.price || 0}</div>
+              <div className="mono pos" style={{ fontSize: 24, fontWeight: 600 }}>{fmtUSDPrice(data.price || 0)}</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>SPOT $/T</div>
             </div>
           ) : (
             <div style={{ textAlign: 'right' }}>
-              <div className="mono" style={{ fontSize: 24, fontWeight: 600 }}>${data.price || data.stock_price || 0}</div>
+              <div className="mono" style={{ fontSize: 24, fontWeight: 600 }}>{fmtTickerPrice(data.price || data.stock_price || 0, data.ticker)}</div>
               <div style={{ fontSize: 12, marginTop: 2 }}>{fmtChg(data.change_percent)}</div>
             </div>
           )}
@@ -175,7 +178,11 @@ const ReportPage = () => {
                 </div>
               ) : (
                 <div className="panel">
-                  <div className="panel-header"><h3>Live Signals</h3></div>
+                  <div className="panel-header">
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Live Signals {data.pathway_computed && <span title="Live analytics powered by Pathway">⚡</span>}
+                    </h3>
+                  </div>
                   <div style={{ padding: '0 14px' }}>
                     <SignalRow label="Impact Rating"    value={data.impact_rating ? `${fmtNum(data.impact_rating)}/100` : 'N/A'} color={data.impact_rating>80?'var(--green)':data.impact_rating>60?'var(--amber)':'var(--red)'} />
                     <SignalRow label="Policy Alignment" value={data.policy_alignment ? `${fmtNum(data.policy_alignment)}%` : 'N/A'} color={data.policy_alignment>80?'var(--green)':data.policy_alignment>50?'var(--amber)':'var(--red)'} />
@@ -230,7 +237,7 @@ const ReportPage = () => {
               
               <AgentTracePanel 
                 id={id}
-                streamUrl={`http://localhost:5001/api/${isProject ? 'project' : 'company'}/${id}/report/stream`}
+                streamUrl={`${API_BASE_URL}/api/${isProject ? 'project' : 'company'}/${id}/report/stream`}
                 onComplete={html => {
                   setReportHtml(html);
                   sessionStorage.setItem(`report_${id}`, html);

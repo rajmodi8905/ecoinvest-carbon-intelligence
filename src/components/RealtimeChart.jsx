@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../services/api';
+import { fmtTickerPrice } from '../utils/currency';
+
 
 const RealtimeChart = ({ currentPrice, symbol }) => {
   const [dataPoints, setDataPoints] = useState([]);
@@ -90,7 +92,7 @@ const RealtimeChart = ({ currentPrice, symbol }) => {
         <h3 style={{ margin: 0, fontSize: '14px', color: 'var(--text-secondary)' }}>Live Market Chart</h3>
         <div style={{ textAlign: 'right' }}>
           <div className="mono" style={{ fontSize: '24px', fontWeight: 600, color: 'var(--text-primary)' }}>
-            ${latestPrice.toFixed(2)}
+            {fmtTickerPrice(latestPrice, symbol)}
           </div>
           <div className="mono" style={{ fontSize: '12px', color }}>
             {isPositive ? '▲' : '▼'} {Math.abs(latestPrice - startPrice).toFixed(2)} ({(Math.abs(latestPrice - startPrice) / startPrice * 100).toFixed(2)}%)

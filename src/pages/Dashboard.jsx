@@ -5,7 +5,10 @@ import StatCard from '../components/StatCard';
 import TerminalTable from '../components/TerminalTable';
 import SentimentBadge from '../components/SentimentBadge';
 
-const fmtPrice = v => v ? `$${parseFloat(v).toFixed(2)}` : '—';
+import { fmtTickerPrice } from '../utils/currency';
+
+const fmtPrice = v => v ? `$${parseFloat(v).toFixed(2)}` : '—'; // for carbon credit prices (always USD)
+
 const fmtChg   = v => {
   const n = parseFloat(v);
   return <span className={n >= 0 ? 'pos mono' : 'neg mono'}>{n >= 0 ? '+' : ''}{n.toFixed(2)}%</span>;
@@ -27,8 +30,13 @@ const INDEX_COLS = [
 
 // ── Top movers columns ────────────────────────────────────────────────────────
 const MOVER_COLS = [
-  { key: 'ticker',         label: 'TICKER', width: 70, render: v => <span className="mono" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{v}</span> },
-  { key: 'price',          label: 'LAST',   width: 72, align: 'right', render: v => <span className="mono">{fmtPrice(v)}</span> },
+  { key: 'ticker',         label: 'TICKER', width: 70, render: (v, row) => (
+      <span className="mono" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+        {v} {row?.pathway_computed && <span title="Live analytics powered by Pathway" style={{ fontSize: '11px' }}>⚡</span>}
+      </span>
+  ) },
+  { key: 'price',          label: 'LAST',   width: 72, align: 'right', render: (v, row) => <span className="mono">{fmtTickerPrice(v, row?.ticker)}</span> },
+
   { key: 'change_percent', label: 'CHG%',   width: 70, align: 'right', render: fmtChg },
   { key: 'risk',           label: 'RISK',   width: 55, align: 'right', render: v => {
     const n = parseFloat(v);

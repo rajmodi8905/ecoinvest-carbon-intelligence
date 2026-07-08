@@ -5,17 +5,22 @@ import StatCard from '../components/StatCard';
 import TerminalTable from '../components/TerminalTable';
 import * as api from '../services/api';
 
-const fmtPrice = v => v ? `$${parseFloat(v).toFixed(2)}` : '—';
+import { fmtTickerPrice } from '../utils/currency';
+
 const fmtChg   = v => { const n = parseFloat(v); return <span className={`mono ${n>=0?'pos':'neg'}`}>{n>=0?'+':''}{n.toFixed(2)}%</span>; };
 const fmtNum   = (v, d=3) => v != null ? parseFloat(v).toFixed(d) : '—';
 
 const COL_DEFS = [
   { key: 'ticker',         label: 'TICKER',    width: 72,
-    render: v => <span className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{v}</span> },
+    render: (v, row) => (
+      <span className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+        {v} {row?.pathway_computed && <span title="Live analytics powered by Pathway" style={{ fontSize: '11px' }}>⚡</span>}
+      </span>
+    ) },
   { key: 'company_name',   label: 'COMPANY',   width: '1fr', sortable: false,
     render: v => <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</span> },
   { key: 'price',          label: 'LAST',      width: 80,  align: 'right',
-    render: v => <span className="mono">{fmtPrice(v)}</span> },
+    render: (v, row) => <span className="mono">{fmtTickerPrice(v, row?.ticker)}</span> },
   { key: 'change_percent', label: 'CHG%',      width: 72,  align: 'right', render: fmtChg },
   { key: 'risk',           label: 'RISK▼',     width: 65,  align: 'right',
     render: v => { const n=parseFloat(v); return <span className="mono" style={{color: n>0.4?'var(--red)':n>0.2?'var(--amber)':'var(--green)'}}>{n.toFixed(3)}</span>; } },

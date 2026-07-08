@@ -213,6 +213,15 @@ def fetch_from_newsapi(api_key):
                 if data.get('status') == 'ok':
                     articles.extend(data.get('articles', []))
                     print(f"✅ NewsAPI: Fetched {len(data.get('articles', []))} articles for '{keyword}'")
+            elif response.status_code == 401:
+                # Invalid/expired key — stop immediately instead of spamming
+                # 401 means the key itself is wrong, not a rate limit
+                print(
+                    "❌ NewsAPI: Key is invalid or expired (HTTP 401). Skipping for this run.\n"
+                    "   ➤ To fix: Get a free key at https://newsapi.org/register\n"
+                    "   ➤ Then add it to your .env file: NEWS_API_KEY=your_key_here"
+                )
+                break
             elif response.status_code == 426:
                 print(f"⚠️ NewsAPI: Upgrade required (HTTP 426) - using free tier limits")
                 break

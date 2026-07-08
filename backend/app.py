@@ -29,6 +29,7 @@ from services.company_service import CompanyService
 from services.project_report_service import ProjectReportService
 from aibot import aibot_bp, set_pathway_reader, set_company_service, set_project_service, set_projects_service, set_live_news_service
 import frontend_actions
+from redis_cache_backend import redis_cache_get, redis_cache_set
 
 # Import RAG services for vector store initialization
 try:
@@ -247,16 +248,20 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     }), code
 
-# In-memory cache for yfinance history to prevent rate limiting
-yfinance_cache = {}
+# yfinance history cache backed by Redis (24hr TTL, survives restarts)
+# Falls back gracefully to no-cache if Redis is unavailable
+YFINANCE_CACHE_TTL = 86400  # 24 hours
+
 
 @app.route('/api/company/<ticker>/history', methods=['GET'])
 def company_history(ticker):
     """Fetch 1-day intraday history for a given ticker."""
-    now = time.time()
-    # Cache for 24 hours (86400 seconds) to avoid Yahoo Finance rate limits
-    if ticker in yfinance_cache and now - yfinance_cache[ticker]['time'] < 86400:
-        return jsonify(yfinance_cache[ticker]['data'])
+    cache_key = f"yfinance:{ticker}"
+
+    # Check Redis cache first (24hr TTL, survives restarts)
+    cached = redis_cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
 
     try:
         stock = yf.Ticker(ticker)
@@ -268,20 +273,21 @@ def company_history(ticker):
             hist = stock.history(period="1mo", interval="1d")
             
         if hist.empty:
-            # Cache the failure for 60 seconds to prevent spamming Yahoo Finance (given 86400 max cache time)
-            yfinance_cache[ticker] = {'time': now - 86400 + 60, 'data': {'success': False, 'message': 'No data found'}}
+            # Cache the failure for 60 seconds to prevent hammering Yahoo Finance
+            redis_cache_set(cache_key, {'success': False, 'message': 'No data found'}, ttl=60)
             return jsonify({'success': False, 'message': 'No data found'})
 
         # Extract only the Close prices and drop NaNs
         prices = hist['Close'].dropna().tolist()
         
         result = {'success': True, 'prices': prices}
-        yfinance_cache[ticker] = {'time': now, 'data': result}
+        # Cache success for 24 hours
+        redis_cache_set(cache_key, result, ttl=YFINANCE_CACHE_TTL)
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error fetching yfinance history for {ticker}: {e}")
-        # Cache the failure temporarily
-        yfinance_cache[ticker] = {'time': now - 240, 'data': {'success': False, 'message': str(e)}}
+        # Cache failures for 5 minutes to prevent spamming Yahoo Finance
+        redis_cache_set(cache_key, {'success': False, 'message': str(e)}, ttl=300)
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])

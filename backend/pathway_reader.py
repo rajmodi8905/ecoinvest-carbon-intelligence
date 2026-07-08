@@ -246,7 +246,28 @@ class PathwayDataReader:
         if country:
             projects = [p for p in projects if p.get('country') == country]
         return projects[:limit]
-    
+    def get_projects_by_ids(self, project_ids: List[str]) -> List[Dict]:
+        """Fetch specific projects by ID to avoid limit truncation during RAG."""
+        if not project_ids:
+            return []
+            
+        if self.use_db:
+            try:
+                conn = self._get_db_connection()
+                cur = conn.cursor()
+                format_strings = ','.join(['%s'] * len(project_ids))
+                query = f"SELECT * FROM verra WHERE id IN ({format_strings}) OR project_id IN ({format_strings})"
+                cur.execute(query, tuple(project_ids) + tuple(project_ids))
+                projects = [dict(row) for row in cur.fetchall()]
+                cur.close()
+                conn.close()
+                return projects
+            except Exception as e:
+                logger.error(f"Database error in get_projects_by_ids: {e}")
+                
+        all_projects = self.get_projects(limit=10000)
+        return [p for p in all_projects if p.get('id') in project_ids or p.get('project_id') in project_ids]
+
     def get_finance(self, ticker: Optional[str] = None) -> List[Dict]:
         """Get finance data — gRPC → DB → JSONL fallback chain."""
         # Tier 1: gRPC

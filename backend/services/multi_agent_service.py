@@ -22,6 +22,8 @@ from typing import Generator, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+from .db_cache import get_cached_insight, set_cached_insight
+
 # Try imports — all are optional; service degrades gracefully
 try:
     from langchain_core.messages import HumanMessage, SystemMessage

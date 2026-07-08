@@ -49,7 +49,7 @@ def _create_gemini_llm():
             google_api_key=api_key
         )
         
-        logger.info("✅ Shared LLM initialized (Gemini 2.0 Flash)")
+        logger.info("✅ Shared LLM initialized (Gemini 2.5 Flash)")
         return llm
         
     except ImportError as e:
