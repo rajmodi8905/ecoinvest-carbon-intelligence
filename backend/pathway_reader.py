@@ -256,7 +256,7 @@ class PathwayDataReader:
                 conn = self._get_db_connection()
                 cur = conn.cursor()
                 format_strings = ','.join(['%s'] * len(project_ids))
-                query = f"SELECT * FROM verra WHERE id IN ({format_strings}) OR project_id IN ({format_strings})"
+                query = f"SELECT * FROM verra WHERE id::text IN ({format_strings}) OR project_id IN ({format_strings})"
                 cur.execute(query, tuple(project_ids) + tuple(project_ids))
                 projects = [dict(row) for row in cur.fetchall()]
                 cur.close()
