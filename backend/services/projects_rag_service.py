@@ -204,7 +204,7 @@ class ProjectsRAGService:
     
     def _get_new_projects(self) -> List[Dict]:
         """Get only new projects that haven't been indexed yet."""
-        all_projects = self._load_all_projects(limit=3000)
+        all_projects = self._load_all_projects(limit=1000)
         new_projects = []
         
         for project in all_projects:
@@ -322,7 +322,7 @@ class ProjectsRAGService:
             logger.info("🔨 Building initial vector store...")
             
             print("📂 Step 1/5: Loading projects from projects.jsonl...")
-            MAX_PROJECTS = 3000
+            MAX_PROJECTS = 1000
             projects = self._load_all_projects(limit=MAX_PROJECTS)
             if not projects:
                 logger.warning("⚠️ No projects to index")

@@ -108,7 +108,7 @@ class AnalyticsService:
             Dict with carbon market trends
         """
         try:
-            projects = self.pathway_reader.get_projects(limit=10000)
+            projects = self.pathway_reader.get_projects(limit=1000)
             
             if not projects:
                 return {'success': False, 'error': 'No projects data available'}
@@ -155,7 +155,7 @@ class AnalyticsService:
             Dict with sentiment analysis
         """
         try:
-            news = self.pathway_reader.get_news(limit=1000)
+            news = self.pathway_reader.get_news(limit=250)
             
             if not news:
                 return {'success': False, 'error': 'No news data available'}
@@ -193,7 +193,7 @@ class AnalyticsService:
             Dict with market summary
         """
         try:
-            projects = self.pathway_reader.get_projects(limit=10000)
+            projects = self.pathway_reader.get_projects(limit=1000)
             finance = self.pathway_reader.get_finance()
             news = self.pathway_reader.get_news(limit=100)
             
@@ -265,7 +265,7 @@ class AnalyticsService:
         confidence = 0.4·min(1,N24h/20) + 0.3·min(1,sources/5) + 0.3·|mean_sign|
         """
         try:
-            news = self.pathway_reader.get_news(limit=2000)
+            news = self.pathway_reader.get_news(limit=250)
             if not news:
                 return {'success': True, 'themes': []}
 
@@ -357,7 +357,7 @@ class AnalyticsService:
         enriched with Carbonmark best-ask prices.
         """
         try:
-            projects = self.pathway_reader.get_projects(limit=10000)
+            projects = self.pathway_reader.get_projects(limit=1000)
             if not projects:
                 return {'success': False, 'error': 'No projects data'}
 
@@ -435,7 +435,7 @@ class AnalyticsService:
         """
         try:
             finance = self.pathway_reader.get_finance()
-            news    = self.pathway_reader.get_news(limit=2000)
+            news    = self.pathway_reader.get_news(limit=250)
 
             if not finance:
                 return {'success': False, 'error': 'No finance data'}

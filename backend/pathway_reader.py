@@ -182,7 +182,7 @@ class PathwayDataReader:
         age = (datetime.now() - self._cache[cache_key]['timestamp']).total_seconds()
         return age > self._cache_ttl
     
-    def get_projects(self, country: Optional[str] = None, limit: int = 500) -> List[Dict]:
+    def get_projects(self, country: Optional[str] = None, limit: int = 1000) -> List[Dict]:
         """Get carbon projects from Pathway output or database"""
         # Try database first if available
         if self.use_db:
@@ -211,7 +211,7 @@ class PathwayDataReader:
         
         # Fallback to JSONL
         if self._should_refresh_cache('projects', self.projects_file):
-            self._cache['projects']['data'] = self._read_jsonl_file(self.projects_file, max_records=5000)
+            self._cache['projects']['data'] = self._read_jsonl_file(self.projects_file, max_records=1000)
             self._cache['projects']['timestamp'] = datetime.now()
         
         projects = self._cache['projects']['data']
@@ -257,7 +257,7 @@ class PathwayDataReader:
         
         return finance_data
     
-    def get_news(self, source: Optional[str] = None, limit: int = 1000) -> List[Dict]:
+    def get_news(self, source: Optional[str] = None, limit: int = 250) -> List[Dict]:
         """Get news from database or Pathway output"""
         # Try database first for complete data
         if self.use_db:
@@ -286,7 +286,7 @@ class PathwayDataReader:
         
         # Fallback to JSONL
         if self._should_refresh_cache('news', self.news_file):
-            self._cache['news']['data'] = self._read_jsonl_file(self.news_file, max_records=1000)
+            self._cache['news']['data'] = self._read_jsonl_file(self.news_file, max_records=250)
             self._cache['news']['timestamp'] = datetime.now()
         
         news_data = self._cache['news']['data']
@@ -298,9 +298,9 @@ class PathwayDataReader:
     
     def get_analytics(self) -> Dict[str, Any]:
         """Generate analytics from current data"""
-        projects = self.get_projects(limit=5000)
+        projects = self.get_projects(limit=1000)
         finance = self.get_finance()
-        news = self.get_news(limit=1000)
+        news = self.get_news(limit=250)
         
         total_supply = sum(p.get('available_credits', 0) for p in projects)
         total_price_sum = sum(p.get('price', 0) for p in projects if p.get('price'))

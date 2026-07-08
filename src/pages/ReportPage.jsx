@@ -4,9 +4,11 @@ import * as api from '../services/api';
 import StatCard from '../components/StatCard';
 import SentimentBadge from '../components/SentimentBadge';
 import AgentTracePanel from '../components/AgentTracePanel';
-import EntityGraph from '../components/EntityGraph';
+import SWOTMatrix from '../components/SWOTMatrix';
+import ImpactTranslator from '../components/ImpactTranslator';
 import ReactMarkdown from 'react-markdown';
 import RealtimeChart from '../components/RealtimeChart';
+import ImpactDashboard from '../components/ImpactDashboard';
 
 const fmtPrice = v => v ? `$${parseFloat(v).toFixed(2)}` : '—';
 const fmtChg   = v => { const n = parseFloat(v); return <span className={`mono ${n>=0?'pos':'neg'}`}>{n>=0?'+':''}{n.toFixed(2)}%</span>; };
@@ -186,14 +188,12 @@ const ReportPage = () => {
                 </div>
               )}
               
-              {/* Entity Graph */}
-              <EntityGraph 
-                ticker={id} 
-                macroThemes={themes} 
-                newsArticles={news} 
-                relatedProjects={projects} 
-                onNodeClick={() => {}}
-              />
+              {/* AI Powered Summary Panel */}
+              {isProject ? (
+                <ImpactTranslator projectId={id} />
+              ) : (
+                <SWOTMatrix ticker={id} />
+              )}
             </div>
             
             {/* Right Col */}
@@ -204,9 +204,15 @@ const ReportPage = () => {
                 </div>
               )}
               
-              <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px 20px' }}>
-                <RealtimeChart currentPrice={data.price} symbol={id} />
-              </div>
+              {isProject ? (
+                <div style={{ flex: 1 }}>
+                  <ImpactDashboard data={data} />
+                </div>
+              ) : (
+                <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px 20px' }}>
+                  <RealtimeChart currentPrice={data.price} symbol={id} />
+                </div>
+              )}
             </div>
           </div>
         )}

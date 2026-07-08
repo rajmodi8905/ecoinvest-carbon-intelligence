@@ -61,59 +61,33 @@ APIS = {
 }
 
 # Priority tickers
-TICKERS = ['TSLA', 'MSFT', 'NVDA', 'AAPL', 'GOOGL', 'AMZN', 'ORCL']
+TICKERS = [
+    'TSLA', 'MSFT', 'NVDA', 'AAPL', 'GOOGL', 'AMZN', 'ORCL', 'ENPH', 'NEE', 'FLNC',
+    'TATAPOWER.NS', 'RELIANCE.NS', 'INFY.NS', 'TCS.NS', 'ADANIGREEN.NS', 'NTPC.NS', 'SUZLON.NS', 'JSWENERGY.NS', 'ITC.NS', 'WIPRO.NS'
+]
 
 # Company metadata
 COMPANY_INFO = {
-    'TSLA': {
-        'name': 'Tesla, Inc.',
-        'industry': 'Automotive',
-        'description': 'Electric vehicles and clean energy',
-        'website': 'https://www.tesla.com',
-        'market_cap': '$800B'
-    },
-    'MSFT': {
-        'name': 'Microsoft Corporation',
-        'industry': 'Technology',
-        'description': 'Software, cloud computing, and AI',
-        'website': 'https://www.microsoft.com',
-        'market_cap': '$3.0T'
-    },
-    'NVDA': {
-        'name': 'NVIDIA Corporation',
-        'industry': 'Technology',
-        'description': 'Graphics processing and AI computing',
-        'website': 'https://www.nvidia.com',
-        'market_cap': '$1.2T'
-    },
-    'AAPL': {
-        'name': 'Apple Inc.',
-        'industry': 'Technology',
-        'description': 'Consumer electronics and software',
-        'website': 'https://www.apple.com',
-        'market_cap': '$3.5T'
-    },
-    'GOOGL': {
-        'name': 'Alphabet Inc.',
-        'industry': 'Technology',
-        'description': 'Internet services and AI',
-        'website': 'https://www.google.com',
-        'market_cap': '$2.0T'
-    },
-    'AMZN': {
-        'name': 'Amazon.com, Inc.',
-        'industry': 'E-commerce',
-        'description': 'Online retail and cloud services',
-        'website': 'https://www.amazon.com',
-        'market_cap': '$1.8T'
-    },
-    'ORCL': {
-        'name': 'Oracle Corporation',
-        'industry': 'Technology',
-        'description': 'Database software and cloud services',
-        'website': 'https://www.oracle.com',
-        'market_cap': '$350B'
-    }
+    'TSLA': {'name': 'Tesla, Inc.', 'industry': 'Automotive', 'description': 'Electric vehicles and clean energy', 'website': 'https://www.tesla.com', 'market_cap': '$800B'},
+    'MSFT': {'name': 'Microsoft Corporation', 'industry': 'Technology', 'description': 'Software, cloud computing, and AI', 'website': 'https://www.microsoft.com', 'market_cap': '$3.0T'},
+    'NVDA': {'name': 'NVIDIA Corporation', 'industry': 'Semiconductors', 'description': 'Graphics processing and AI computing', 'website': 'https://www.nvidia.com', 'market_cap': '$3.0T'},
+    'AAPL': {'name': 'Apple Inc.', 'industry': 'Technology', 'description': 'Consumer electronics and software', 'website': 'https://www.apple.com', 'market_cap': '$3.5T'},
+    'GOOGL': {'name': 'Alphabet Inc.', 'industry': 'Technology', 'description': 'Internet services and AI', 'website': 'https://www.google.com', 'market_cap': '$2.0T'},
+    'AMZN': {'name': 'Amazon.com, Inc.', 'industry': 'E-commerce & Cloud', 'description': 'Online retail and cloud services', 'website': 'https://www.amazon.com', 'market_cap': '$1.8T'},
+    'ORCL': {'name': 'Oracle Corporation', 'industry': 'Technology', 'description': 'Database software and cloud services', 'website': 'https://www.oracle.com', 'market_cap': '$350B'},
+    'ENPH': {'name': 'Enphase Energy, Inc.', 'industry': 'Renewable Energy', 'description': 'Microinverter-based solar and battery systems', 'website': 'https://enphase.com', 'market_cap': '$15B'},
+    'NEE': {'name': 'NextEra Energy, Inc.', 'industry': 'Utilities', 'description': 'Largest producer of wind and solar energy', 'website': 'https://www.nexteraenergy.com', 'market_cap': '$150B'},
+    'FLNC': {'name': 'Fluence Energy, Inc.', 'industry': 'Energy Storage', 'description': 'Grid-scale battery storage products and software', 'website': 'https://fluenceenergy.com', 'market_cap': '$4B'},
+    'TATAPOWER.NS': {'name': 'Tata Power Company Limited', 'industry': 'Utilities & Clean Energy', 'description': 'Integrated clean energy and EV charging leader', 'website': 'https://www.tatapower.com', 'market_cap': '$14B'},
+    'RELIANCE.NS': {'name': 'Reliance Industries Limited', 'industry': 'Conglomerate', 'description': '$10B green hydrogen and solar manufacturing initiative', 'website': 'https://www.ril.com', 'market_cap': '$240B'},
+    'INFY.NS': {'name': 'Infosys Limited', 'industry': 'Information Technology', 'description': 'Global IT consulting leader, 100% carbon neutral', 'website': 'https://www.infosys.com', 'market_cap': '$80B'},
+    'TCS.NS': {'name': 'Tata Consultancy Services', 'industry': 'Information Technology', 'description': 'Global IT services driving digital sustainability', 'website': 'https://www.tcs.com', 'market_cap': '$160B'},
+    'ADANIGREEN.NS': {'name': 'Adani Green Energy Limited', 'industry': 'Renewable Energy', 'description': 'Developing massive 30 GW solar/wind hybrid parks', 'website': 'https://www.adanigreenenergy.com', 'market_cap': '$30B'},
+    'NTPC.NS': {'name': 'NTPC Limited', 'industry': 'Utilities', 'description': 'Decarbonizing utility installing 60 GW renewables', 'website': 'https://www.ntpc.co.in', 'market_cap': '$40B'},
+    'SUZLON.NS': {'name': 'Suzlon Energy Limited', 'industry': 'Wind Energy', 'description': 'Premier wind turbine manufacturer with 20+ GW capacity', 'website': 'https://www.suzlon.com', 'market_cap': '$8B'},
+    'JSWENERGY.NS': {'name': 'JSW Energy Limited', 'industry': 'Utilities', 'description': 'Hydro, wind, and green hydrogen power producer', 'website': 'https://www.jsw.in/energy', 'market_cap': '$12B'},
+    'ITC.NS': {'name': 'ITC Limited', 'industry': 'Consumer Goods', 'description': 'Carbon-positive and water-positive conglomerate', 'website': 'https://www.itcportal.com', 'market_cap': '$65B'},
+    'WIPRO.NS': {'name': 'Wipro Limited', 'industry': 'Information Technology', 'description': 'Committed to Net-Zero GHG emissions by 2040', 'website': 'https://www.wipro.com', 'market_cap': '$30B'}
 }
 
 def fetch_esg_from_yahoo(ticker):

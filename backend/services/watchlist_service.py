@@ -36,12 +36,24 @@ class WatchlistService:
             
             # Format for watchlist display
             companies = []
+            
+            # The 20 priority tickers we want to show
+            active_tickers = {
+                'TSLA', 'MSFT', 'NVDA', 'AAPL', 'GOOGL', 'AMZN', 'ORCL', 'ENPH', 'NEE', 'FLNC',
+                'TATAPOWER.NS', 'RELIANCE.NS', 'INFY.NS', 'TCS.NS', 'ADANIGREEN.NS', 'NTPC.NS', 
+                'SUZLON.NS', 'JSWENERGY.NS', 'ITC.NS', 'WIPRO.NS'
+            }
+            
             for company in finance_data:
+                ticker = company.get('ticker', '')
+                if ticker not in active_tickers:
+                    continue
+                    
                 # Use 'price' field as the source of truth, since 'stock_price' is often null
                 price_value = company.get('price', 0) or company.get('stock_price', 0)
                 companies.append({
-                    'id': company.get('ticker', ''),
-                    'ticker': company.get('ticker', ''),
+                    'id': ticker,
+                    'ticker': ticker,
                     'name': company.get('company_name', ''),
                     'company_name': company.get('company_name', ''),
                     'industry': company.get('industry', 'Technology'),

@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from datetime import datetime
@@ -241,25 +241,34 @@ yfinance_cache = {}
 def company_history(ticker):
     """Fetch 1-day intraday history for a given ticker."""
     now = time.time()
-    # Cache for 5 minutes (300 seconds)
-    if ticker in yfinance_cache and now - yfinance_cache[ticker]['time'] < 300:
+    # Cache for 24 hours (86400 seconds) to avoid Yahoo Finance rate limits
+    if ticker in yfinance_cache and now - yfinance_cache[ticker]['time'] < 86400:
         return jsonify(yfinance_cache[ticker]['data'])
 
     try:
         stock = yf.Ticker(ticker)
-        # 1-day history at 5-minute intervals
-        hist = stock.history(period="1d", interval="5m")
+        # 5-day history at 5-minute intervals
+        hist = stock.history(period="5d", interval="5m")
+        
+        # Fallback to daily data if intraday fails (often due to rate limits or market holidays)
         if hist.empty:
+            hist = stock.history(period="1mo", interval="1d")
+            
+        if hist.empty:
+            # Cache the failure for 60 seconds to prevent spamming Yahoo Finance (given 86400 max cache time)
+            yfinance_cache[ticker] = {'time': now - 86400 + 60, 'data': {'success': False, 'message': 'No data found'}}
             return jsonify({'success': False, 'message': 'No data found'})
 
-        # Extract only the Close prices
-        prices = hist['Close'].tolist()
+        # Extract only the Close prices and drop NaNs
+        prices = hist['Close'].dropna().tolist()
         
         result = {'success': True, 'prices': prices}
         yfinance_cache[ticker] = {'time': now, 'data': result}
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error fetching yfinance history for {ticker}: {e}")
+        # Cache the failure temporarily
+        yfinance_cache[ticker] = {'time': now - 240, 'data': {'success': False, 'message': str(e)}}
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])
@@ -640,6 +649,36 @@ def stream_project_report(project_id):
     except Exception as e:
         logger.error(f"SSE project report error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/llm/swot/<ticker>', methods=['GET'])
+def stream_company_swot(ticker):
+    """SSE endpoint: streams a Sustainability SWOT analysis for a company."""
+    from services.llm_generators import generate_company_swot_stream
+    
+    # Get company info for context
+    company_response = company_service.get_company_details(ticker)
+    company_info = company_response.get('data', {}) if company_response.get('success') else {}
+    
+    return Response(
+        generate_company_swot_stream(ticker, company_info),
+        mimetype='text/event-stream'
+    )
+
+
+@app.route('/api/llm/impact/<project_id>', methods=['GET'])
+def stream_project_impact(project_id):
+    """SSE endpoint: streams a real-world impact translation for a project."""
+    from services.llm_generators import generate_project_impact_stream
+    from services.projects_service import ProjectsService
+    
+    projects = pathway_reader.get_projects()
+    project_info = next((p for p in projects if str(p.get('project_id', '')) == str(project_id)), {})
+    
+    return Response(
+        generate_project_impact_stream(project_id, project_info),
+        mimetype='text/event-stream'
+    )
 
 
 if __name__ == '__main__':

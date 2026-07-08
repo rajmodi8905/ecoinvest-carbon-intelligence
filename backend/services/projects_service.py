@@ -103,7 +103,7 @@ class ProjectsService:
                 logger.info(f"📋 Extracted {len(project_ids)} unique project IDs: {list(project_ids)[:5]}...")
                 
                 # Get full project data for matched IDs
-                all_projects = self.pathway_reader.get_projects(limit=5000)
+                all_projects = self.pathway_reader.get_projects(limit=1000)
                 
                 # Match by project_id field in pathway reader data
                 matched_projects = [

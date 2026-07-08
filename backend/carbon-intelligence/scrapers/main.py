@@ -10,32 +10,14 @@ from verra_scraper import run_verra_scraper
 
 print("🔥 Scraper service started")
 
-# Top 20 famous stocks/ETFs
+# Top 20 marquee stocks (10 US + 10 Indian)
 COMPANIES = [
-    "TSLA",   
-    "MSFT",   
-    "GOOGL",  
-    "AAPL",   
-    "AMZN",   
-    "ENPH",   
-    "PLUG",   
-    "FCEL",   
-    "BLNK",   
-    "CHPT",   
-    "NEE",    
-    "RUN",    
-    "SEDG",   
-    "ORSTED", 
-    "EQNR",   
-    "ICLN",   
-    "TAN",    
-    "QCLN",   
-    "KRBN",
-    "BEPC",
+    "TSLA", "MSFT", "NVDA", "AAPL", "GOOGL", "AMZN", "ORCL", "ENPH", "NEE", "FLNC",
+    "TATAPOWER.NS", "RELIANCE.NS", "INFY.NS", "TCS.NS", "ADANIGREEN.NS", "NTPC.NS", "SUZLON.NS", "JSWENERGY.NS", "ITC.NS", "WIPRO.NS"
 ]
 
-# Configurable scrape interval (in seconds)
-SCRAPE_INTERVAL_SECONDS = int(os.getenv("SCRAPE_INTERVAL_SECONDS", 30))
+# Configurable scrape interval (in seconds) - default 5 seconds for high-frequency polling
+SCRAPE_INTERVAL_SECONDS = int(os.getenv("SCRAPE_INTERVAL_SECONDS", 5))
 
 CARBON_KEYWORDS = [
     "carbon credits",

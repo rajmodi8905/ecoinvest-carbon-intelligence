@@ -148,7 +148,7 @@ def run_verra_scraper(conn=None):
     total = 0
     skip = 0
     batch_size = 100
-    max_projects = 500  # Limit to 500 projects to avoid long processing
+    max_projects = 1000  # Limit to 1000 projects to optimize performance
     all_projects = []
 
     # Fetch all projects from Verra API

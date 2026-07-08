@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE_URL } from '../services/api';
 
 const RealtimeChart = ({ currentPrice, symbol }) => {
   const [dataPoints, setDataPoints] = useState([]);
@@ -10,13 +11,13 @@ const RealtimeChart = ({ currentPrice, symbol }) => {
   useEffect(() => {
     if (!symbol) return;
     
-    fetch(`http://localhost:5001/api/company/${symbol}/history`)
+    fetch(`${API_BASE_URL}/api/company/${symbol}/history`)
       .then(res => res.json())
       .then(data => {
         if (data.success && data.prices && data.prices.length > 0) {
-          // Take up to bufferSize of the most recent historical points
           const history = data.prices.slice(-bufferSize);
-          setDataPoints(history);
+          // If we already have a live currentPrice, make sure it's the very last point!
+          setDataPoints(currentPrice ? [...history, parseFloat(currentPrice)] : history);
         }
       })
       .catch(err => console.error('Failed to fetch history:', err));
@@ -59,9 +60,11 @@ const RealtimeChart = ({ currentPrice, symbol }) => {
   const width = 400;
   const height = 200;
   
-  // Calculate points for the polyline
-  const points = dataPoints.map((val, i) => {
-    const x = (i / (bufferSize - 1)) * width;
+  // If history fetch fails and we only have 1 point, duplicate it to draw a flat line
+  const displayPoints = dataPoints.length === 1 ? [dataPoints[0], dataPoints[0]] : dataPoints;
+  const pointCount = Math.max(displayPoints.length - 1, 1);
+  const points = displayPoints.map((val, i) => {
+    const x = (i / pointCount) * width;
     const y = height - ((val - minPrice) / (maxPrice - minPrice)) * height;
     return `${x},${y}`;
   }).join(' ');
@@ -69,8 +72,8 @@ const RealtimeChart = ({ currentPrice, symbol }) => {
   // Calculate area under the line for the gradient
   const areaPoints = `0,${height} ${points} ${width},${height}`;
 
-  const latestPrice = dataPoints[dataPoints.length - 1];
-  const startPrice = dataPoints[0];
+  const latestPrice = displayPoints[displayPoints.length - 1];
+  const startPrice = displayPoints[0];
   const isPositive = latestPrice >= startPrice;
   const color = isPositive ? '#16a34a' : '#dc2626'; // Green or Red
   const gradientId = `chart-gradient-${symbol}`;

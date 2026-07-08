@@ -191,7 +191,7 @@ class MultiAgentReportService:
     def _get_project_data(self, project_id: str) -> Dict[str, Any]:
         """Fetch project details."""
         try:
-            projects = self.pathway_reader.get_projects(limit=10000)
+            projects = self.pathway_reader.get_projects(limit=1000)
             for p in projects:
                 if p.get('project_id') == project_id or p.get('id') == project_id:
                     return {
@@ -213,7 +213,7 @@ class MultiAgentReportService:
         """Match news articles to ticker/company name."""
         import re
         try:
-            news = self.pathway_reader.get_news(limit=1000)
+            news = self.pathway_reader.get_news(limit=250)
             parts = [re.escape(ticker)]
             if company_name and len(company_name) > 3:
                 parts.append(re.escape(company_name))
@@ -225,7 +225,7 @@ class MultiAgentReportService:
     def _search_news_by_text(self, query: str) -> list:
         """Simple keyword match for project news."""
         try:
-            news = self.pathway_reader.get_news(limit=1000)
+            news = self.pathway_reader.get_news(limit=250)
             q = query.lower().split()[:5]
             return [a for a in news if any(w in (a.get('title','') + a.get('summary','')).lower() for w in q)][:15]
         except Exception:

@@ -51,7 +51,7 @@ class ProjectReportService:
         """
         try:
             # Get project data from Pathway
-            project_result = self.pathway_reader.get_projects(limit=10000)
+            project_result = self.pathway_reader.get_projects(limit=1000)
             project = next(
                 (p for p in project_result if p.get('project_id') == project_id), 
                 None
