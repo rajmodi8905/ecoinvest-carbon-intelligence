@@ -17,6 +17,12 @@ import './index.css';
 function AppContent() {
   const navigate = useNavigate();
   const [companies, setCompanies] = React.useState([]);
+  const [theme, setTheme] = React.useState(localStorage.getItem('theme') || 'dark');
+
+  React.useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   React.useEffect(() => {
     // Init WebSocket once
@@ -31,6 +37,15 @@ function AppContent() {
     api.onDataUpdate('finance', (data) => {
       const list = Array.isArray(data) ? data : data?.data || [];
       if (list.length > 0) setCompanies(list);
+    });
+
+    // Theme toggle commands from AI bot
+    api.onDataUpdate('change_theme', (data) => {
+      if (data?.theme) {
+        setTheme(data.theme);
+      } else {
+        setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+      }
     });
 
     // Navigation commands from AI bot

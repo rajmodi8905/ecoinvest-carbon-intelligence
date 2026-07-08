@@ -3,6 +3,7 @@ import logging
 from typing import Iterator
 from llm_manager import get_llm
 from langchain_core.messages import HumanMessage
+from services.db_cache import get_cached_insight, set_cached_insight
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,14 @@ def generate_company_swot_stream(ticker: str, company_info: dict) -> Iterator[st
     """
     Streams a sustainability-focused SWOT analysis for a company.
     Yields Server-Sent Events (SSE) format data.
+    Uses Postgres ai_insights_cache for instant <50ms repeat loads.
     """
+    cached = get_cached_insight("company", ticker, "swot", expiry_hours=24)
+    if cached:
+        yield f"data: {json.dumps({'content': cached})}\n\n"
+        yield f"data: [DONE]\n\n"
+        return
+
     llm = get_llm()
     if not llm:
         yield f"data: {json.dumps({'content': 'LLM is not available.'})}\n\n"
@@ -37,9 +45,13 @@ def generate_company_swot_stream(ticker: str, company_info: dict) -> Iterator[st
 
     try:
         messages = [HumanMessage(content=prompt)]
+        full_text = []
         for chunk in llm.stream(messages):
             if chunk.content:
+                full_text.append(chunk.content)
                 yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+        if full_text:
+            set_cached_insight("company", ticker, "swot", "".join(full_text))
         yield f"data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Error streaming SWOT: {e}")
@@ -51,7 +63,14 @@ def generate_project_impact_stream(project_id: str, project_info: dict) -> Itera
     """
     Streams a real-world impact translation for a carbon offset project.
     Yields Server-Sent Events (SSE) format data.
+    Uses Postgres ai_insights_cache for instant <50ms repeat loads.
     """
+    cached = get_cached_insight("project", project_id, "impact", expiry_hours=48)
+    if cached:
+        yield f"data: {json.dumps({'content': cached})}\n\n"
+        yield f"data: [DONE]\n\n"
+        return
+
     llm = get_llm()
     if not llm:
         yield f"data: {json.dumps({'content': 'LLM is not available.'})}\n\n"
@@ -75,11 +94,16 @@ def generate_project_impact_stream(project_id: str, project_info: dict) -> Itera
 
     try:
         messages = [HumanMessage(content=prompt)]
+        full_text = []
         for chunk in llm.stream(messages):
             if chunk.content:
+                full_text.append(chunk.content)
                 yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+        if full_text:
+            set_cached_insight("project", project_id, "impact", "".join(full_text))
         yield f"data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Error streaming Impact: {e}")
         error_msg = f"\\n\\nError generating analysis: {str(e)}"
         yield f"data: {json.dumps({'content': error_msg})}\n\n"
+

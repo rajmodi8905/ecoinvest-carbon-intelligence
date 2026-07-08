@@ -96,3 +96,42 @@ CREATE TABLE IF NOT EXISTS ai_insights_cache (
   content TEXT, 
   generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ============================================================
+-- Performance indexes
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_news_published    ON news(published DESC);
+CREATE INDEX IF NOT EXISTS idx_news_source       ON news(source);
+CREATE INDEX IF NOT EXISTS idx_finance_ticker    ON finance(ticker);
+CREATE INDEX IF NOT EXISTS idx_finance_updated   ON finance(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_verra_category    ON verra(category);
+CREATE INDEX IF NOT EXISTS idx_verra_updated     ON verra(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_carbonmark_pid    ON carbonmark(project_id);
+CREATE INDEX IF NOT EXISTS idx_ai_insights_cache_lookup ON ai_insights_cache(entity_type, entity_id, insight_type, generated_at DESC);
+
+-- Fix missing unique constraint on carbonmark
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_carbonmark_project_id'
+  ) THEN
+    ALTER TABLE carbonmark ADD CONSTRAINT uq_carbonmark_project_id UNIQUE (project_id);
+  END IF;
+END $$;
+
+-- ============================================================
+-- Pathway enriched output table (written by the Pathway pipeline)
+-- Flask backend reads from here for real-time enriched signals
+-- ============================================================
+CREATE TABLE IF NOT EXISTS pathway_enriched (
+  id           SERIAL PRIMARY KEY,
+  entity_type  VARCHAR(20)  NOT NULL,   -- 'company' | 'project' | 'theme'
+  entity_id    VARCHAR(100) NOT NULL,   -- ticker, project_id, or theme name
+  metric_key   VARCHAR(50)  NOT NULL,   -- 'risk', 'velocity', 'sentiment_24h', 'floor_price'
+  metric_value FLOAT,
+  extra_json   JSONB,                   -- additional computed fields
+  computed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_pathway_enriched UNIQUE (entity_type, entity_id, metric_key)
+);
+CREATE INDEX IF NOT EXISTS idx_pathway_enriched_entity ON pathway_enriched(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_pathway_enriched_at     ON pathway_enriched(computed_at DESC);

@@ -148,7 +148,8 @@ class CarbonServicer(pb2_grpc.CarbonServiceServicer):
             )
         
         try:
-            with open('/app/output/finance.jsonl', 'r') as f:
+            finance_file = os.path.join(OUTPUT_DIR, "finance.jsonl")
+            with open(finance_file, 'r') as f:
                 lines = f.readlines()
             
             items = []
@@ -201,8 +202,9 @@ class CarbonServicer(pb2_grpc.CarbonServiceServicer):
             return pb2.ProjectDetailResponse(**cached)
         
         try:
-            # Search in projects.jsonl
-            with open('/app/output/projects.jsonl', 'r') as f:
+            # Search in projects.jsonl via OUTPUT_DIR constant
+            projects_file = os.path.join(OUTPUT_DIR, "projects.jsonl")
+            with open(projects_file, 'r') as f:
                 for line in f:
                     try:
                         data = json.loads(line)
@@ -506,6 +508,23 @@ class CarbonServicer(pb2_grpc.CarbonServiceServicer):
             return pb2.FinanceResponse(items=[], count=0)
 
 
+def _run_pathway_supervised():
+    """Run the Pathway pipeline in a loop, restarting on crash.
+    Uses exponential backoff (5s → 10s → 20s → ... → 60s cap).
+    This fixes BUG-01: Pathway was a daemon thread that died silently,
+    leaving the gRPC server serving stale JSONL data with no auto-recovery.
+    """
+    backoff = 5
+    while True:
+        print(f"⚡ Starting Pathway pipeline thread (backoff={backoff}s)...")
+        t = threading.Thread(target=pw.run, daemon=True)
+        t.start()
+        t.join()  # blocks until pathway thread exits (crash or clean stop)
+        print(f"⚠️  Pathway thread exited. Restarting in {backoff}s...")
+        time.sleep(backoff)
+        backoff = min(backoff * 2, 60)  # exponential backoff, cap at 60s
+
+
 def serve():
     print("📡 Starting gRPC server on port 50051...")
 
@@ -513,10 +532,15 @@ def serve():
     pb2_grpc.add_CarbonServiceServicer_to_server(CarbonServicer(), server)
     server.add_insecure_port("[::]:50051")
 
-    print("⚙️  Starting Pathway runtime...")
-    pathway_thread = threading.Thread(target=pw.run, daemon=True)
-    pathway_thread.start()
+    print("⚙️  Starting Pathway runtime (supervised)...")
+    pathway_supervisor = threading.Thread(
+        target=_run_pathway_supervised,
+        daemon=True,
+        name="pathway-supervisor"
+    )
+    pathway_supervisor.start()
 
+    # Give Pathway time to connect to Kafka and build first batch
     time.sleep(5)
 
     server.start()

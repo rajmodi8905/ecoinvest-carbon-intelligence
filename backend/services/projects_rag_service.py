@@ -72,36 +72,38 @@ class ProjectsRAGService:
             return
         
         import os
-        if os.environ.get("LLM_MODE") == "ollama":
-            print("📥 Loading Ollama embedding model (nomic-embed-text)...")
-            logger.info("🚀 Loading Ollama embedding model...")
-            from langchain_community.embeddings import OllamaEmbeddings
-            self.embeddings = OllamaEmbeddings(
-                model="nomic-embed-text",
-                base_url=os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-            )
-            print("   ✓ Ollama embedding model loaded")
-        else:
-            print("📥 Loading HuggingFace embedding model...")
-            logger.info("🚀 Loading embedding model...")
-            
-            import torch
-            # Prevent meta tensor initialization issues
-            torch.set_default_dtype(torch.float32)
-            
-            self.embeddings = HuggingFaceEmbeddings(
+        import os
+        import torch
+        torch.set_default_dtype(torch.float32)
+
+        def _get_hf_embeddings():
+            return HuggingFaceEmbeddings(
                 model_name="sentence-transformers/all-MiniLM-L6-v2",
-                model_kwargs={
-                    'device': 'cpu',
-                    'trust_remote_code': False
-                },
-                encode_kwargs={
-                    'normalize_embeddings': True,
-                    'batch_size': 32
-                },
-                cache_folder=None,  # Use default HuggingFace cache
+                model_kwargs={'device': 'cpu', 'trust_remote_code': False},
+                encode_kwargs={'normalize_embeddings': True, 'batch_size': 32},
                 multi_process=False
             )
+
+        self.embeddings = None
+        if os.environ.get("LLM_MODE") == "ollama":
+            try:
+                print("📥 Loading Ollama embedding model (nomic-embed-text)...")
+                logger.info("🚀 Loading Ollama embedding model...")
+                try:
+                    from langchain_ollama import OllamaEmbeddings
+                except ImportError:
+                    from langchain_community.embeddings import OllamaEmbeddings
+                self.embeddings = OllamaEmbeddings(
+                    model="nomic-embed-text",
+                    base_url=os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+                )
+                print("   ✓ Ollama embedding model loaded")
+            except Exception as embed_err:
+                logger.warning(f"⚠️ Ollama embedding failed ({embed_err}), falling back to HuggingFace CPU embeddings")
+                self.embeddings = _get_hf_embeddings()
+        else:
+            print("📥 Loading HuggingFace embedding model...")
+            self.embeddings = _get_hf_embeddings()
             print("   ✓ Embedding model loaded: sentence-transformers/all-MiniLM-L6-v2")
         logger.info("✅ Embedding model loaded")
         
@@ -419,9 +421,7 @@ class ProjectsRAGService:
     
     def _check_and_update(self):
         """Background task: check for new projects and add them incrementally."""
-        new_projects = self._get_new_projects()
-        if new_projects:
-            self._add_new_projects()
+        self._add_new_projects()
     
     def start_watching(self, interval: int = 60):
         """Start background thread to watch for projects.jsonl changes."""
@@ -536,16 +536,16 @@ class ProjectsRAGService:
 # ============================================================================
 
 _projects_rag_service: Optional[ProjectsRAGService] = None
+_projects_rag_lock = threading.Lock()
 
 
 def get_projects_rag_service() -> Optional[ProjectsRAGService]:
-    """Get or create the global ProjectsRAGService instance."""
+    """Get or create the global ProjectsRAGService instance thread-safely."""
     global _projects_rag_service
-    
-    if _projects_rag_service is None:
-        _projects_rag_service = ProjectsRAGService()
-        _projects_rag_service.start_watching(interval=60)  # Check every minute
-    
+    with _projects_rag_lock:
+        if _projects_rag_service is None:
+            _projects_rag_service = ProjectsRAGService()
+            _projects_rag_service.start_watching(interval=60)  # Check every minute
     return _projects_rag_service
 
 

@@ -280,17 +280,21 @@ class AnalyticsService:
                 )
                 buckets[theme].append(article)
 
-            # Parse publish timestamp (ISO string or epoch int)
-            def parse_ts(article):
+            # Parse publish timestamp — returns now_ts as fallback so articles
+            # without a timestamp are treated as current (not epoch-0 which
+            # would exclude them from the 24h window).
+            def parse_ts(article, _now=now.timestamp()):
                 pub = article.get('published') or article.get('date') or ''
-                t = article.get('time') or article.get('timestamp') or 0
+                t   = article.get('time') or article.get('timestamp') or 0
                 if pub:
                     try:
                         dt = datetime.fromisoformat(pub.replace('Z', '+00:00'))
                         return dt.timestamp()
                     except Exception:
                         pass
-                return float(t) / 1000.0 if t > 1e10 else float(t)
+                if t:
+                    return float(t) / 1000.0 if float(t) > 1e10 else float(t)
+                return _now  # treat as just-received when no timestamp available
 
             themes_out = []
             for theme, articles in buckets.items():
@@ -533,7 +537,37 @@ class AnalyticsService:
                     'momentum':         round(momentum, 3),
                     'sentiment_24h':    round(mean_s, 3),
                     'news_24h':         n_24h,
+                    'pathway_computed': False,   # will be set True if pathway_enriched has data
                 })
+
+            # ── Merge Pathway-computed signals (ARCH-1) ──────────────────────────
+            # Read from pathway_enriched table (written by Pathway streaming pipeline)
+            # If signals are fresh (< 15 min), override computed values and flag with ⚡
+            try:
+                pw_rows = self.pathway_reader.get_pathway_enriched(entity_type='company')
+                # Index by (entity_id, metric_key) for O(1) lookup
+                pw_signals: dict = {}
+                for row in pw_rows:
+                    eid = row.get('entity_id', '')
+                    mkey = row.get('metric_key', '')
+                    pw_signals.setdefault(eid, {})[mkey] = row.get('metric_value')
+
+                for r in results:
+                    sig = pw_signals.get(r['ticker'], {})
+                    if sig:
+                        # Override with Pathway-computed values where available
+                        if 'risk' in sig and sig['risk'] is not None:
+                            r['risk'] = round(sig['risk'], 3)
+                        if 'news_velocity' in sig and sig['news_velocity'] is not None:
+                            r['news_24h'] = int(sig['news_velocity'])
+                        if 'sentiment_24h' in sig and sig['sentiment_24h'] is not None:
+                            r['sentiment_24h'] = round(sig['sentiment_24h'], 3)
+                        r['pathway_computed'] = True  # ⚡ badge trigger in frontend
+            except Exception as pw_err:
+                logger.warning(f"Could not merge pathway_enriched signals: {pw_err}")
+            # ─────────────────────────────────────────────────────────────────────
+
+
 
             results.sort(key=lambda x: x['risk'], reverse=True)
 

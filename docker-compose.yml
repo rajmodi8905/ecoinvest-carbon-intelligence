@@ -102,10 +102,15 @@ services:
       - sh
       - -c
       - |
-        echo 'Waiting for Debezium to be fully ready...'
-        sleep 10
-        echo 'Creating Debezium connector...'
-        curl -X POST http://debezium_connect:8083/connectors \
+        echo 'Waiting for Debezium REST API to be available...'
+        until curl -sf http://debezium_connect:8083/connectors; do
+          echo 'Debezium not ready yet, retrying in 5s...'
+          sleep 5
+        done
+        echo 'Debezium REST API is up. Registering Postgres CDC connector...'
+
+        # Post connector config (idempotent — OK if it already exists)
+        curl -sf -X POST http://debezium_connect:8083/connectors \
           -H 'Content-Type: application/json' \
           -d '{
             "name": "postgres-connector",
@@ -123,8 +128,22 @@ services:
               "table.include.list": "public.verra,public.carbonmark,public.finance,public.news",
               "topic.prefix": "carbon"
             }
-          }'
-        echo 'Connector setup complete!'
+          }' || true
+
+        echo 'Waiting for connector to reach RUNNING state...'
+        for i in $(seq 1 12); do
+          STATUS=$(curl -sf http://debezium_connect:8083/connectors/postgres-connector/status 2>/dev/null || echo "{}")
+          if echo "$STATUS" | grep -q '"state":"RUNNING"'; then
+            echo 'Connector is RUNNING ✓'
+            exit 0
+          fi
+          echo "Attempt $i/12: connector not RUNNING yet, retrying in 10s..."
+          curl -sf -X POST http://debezium_connect:8083/connectors \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"postgres-connector","config":{"connector.class":"io.debezium.connector.postgresql.PostgresConnector","database.hostname":"postgres","database.port":"5432","database.user":"carbon","database.password":"carbonpw","database.dbname":"carbon_intel","database.server.name":"carbon","slot.name":"carbon_slot","plugin.name":"pgoutput","publication.autocreate.mode":"filtered","table.include.list":"public.verra,public.carbonmark,public.finance,public.news","topic.prefix":"carbon"}}' || true
+          sleep 10
+        done
+        echo 'WARNING: connector did not reach RUNNING state within timeout.'
     restart: "no"
 
   carbon_pathway:
@@ -192,6 +211,8 @@ services:
       DB_USER: carbon
       DB_PASSWORD: carbonpw
       PATHWAY_OUTPUT_DIR: /app/carbon-intelligence/server/output
+      PATHWAY_GRPC_HOST: carbon_pathway
+      PATHWAY_GRPC_PORT: "50051"
       CORS_ORIGINS: '*'
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}

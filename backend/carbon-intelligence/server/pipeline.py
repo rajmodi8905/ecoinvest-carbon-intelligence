@@ -106,100 +106,11 @@ def build_pipeline():
         sentiment=pw.this.payload["after"]["sentiment"].as_str(),
     )
 
-    # Write outputs directly without complex joins
-    pw.io.jsonlines.write(verra, "./output/projects.jsonl")
+    # Write outputs directly — consumed by gRPC servicer via JSONL read
+    pw.io.jsonlines.write(verra,   "./output/projects.jsonl")
     pw.io.jsonlines.write(finance, "./output/finance.jsonl")
-    pw.io.jsonlines.write(news, "./output/news.jsonl")
+    pw.io.jsonlines.write(news,    "./output/news.jsonl")
 
     print("✅ Pathway pipeline ready with output connectors.")
+    # Return all three live tables for use in grpc_server.py
     return verra, finance, news
-
-
-
-def run_pathway():
-    print("🚀 Running Pathway pipeline...")
-
-    rdkafka_settings = {
-        "bootstrap.servers": KAFKA_SERVERS,
-        "group.id": "carbon_pathway_consumer",
-        "auto.offset.reset": "earliest",
-        "enable.auto.commit": "true",
-        "auto.commit.interval.ms": "1000",
-    }
-
-    # Read Verra stream
-    verra_stream = pw.io.debezium.read(
-        rdkafka_settings,
-        topic_name="carbon.public.verra",
-        schema=VerraSchema,
-        autocommit_duration_ms=1000,
-    )
-    
-    verra_table = verra_stream.select(
-        project_id=verra_stream.after.project_id,
-        project_name=verra_stream.after.project_name,
-        registry_status=verra_stream.after.registry_status,
-        country=verra_stream.after.country,
-        vintage=verra_stream.after.vintage,
-        supply=verra_stream.after.supply,
-        project_summary=verra_stream.after.project_summary,
-        project_link=verra_stream.after.project_link,
-    )
-    
-    # Read Carbonmark stream
-    carbonmark_stream = pw.io.debezium.read(
-        rdkafka_settings,
-        topic_name="carbon.public.carbonmark",
-        schema=CarbonmarkSchema,
-        autocommit_duration_ms=1000,
-    )
-    
-    carbonmark_table = carbonmark_stream.select(
-        project_id=carbonmark_stream.after.project_id,
-        project_name=carbonmark_stream.after.project_name,
-        vintage=carbonmark_stream.after.vintage,
-        amount=carbonmark_stream.after.amount,
-        project_summary=carbonmark_stream.after.project_summary,
-        project_link=carbonmark_stream.after.project_link,
-    )
-    
-    # Read Finance stream
-    finance_stream = pw.io.debezium.read(
-        rdkafka_settings,
-        topic_name="carbon.public.finance",
-        schema=FinanceSchema,
-        autocommit_duration_ms=1000,
-    )
-    
-    finance_table = finance_stream.select(
-        ticker=finance_stream.after.ticker,
-        price=finance_stream.after.price,
-        volume=finance_stream.after.volume,
-        market_cap=finance_stream.after.market_cap,
-        change_percent=finance_stream.after.change_percent,
-        timestamp=finance_stream.after.timestamp,
-    )
-    
-    unified_table = carbonmark_table.join(verra_table, carbonmark_table.project_id == verra_table.project_id, how="outer").select(
-        project_id=carbonmark_table.project_id,
-        project_name=carbonmark_table.project_name,
-        registry_status=verra_table.registry_status,
-        country=verra_table.country,
-        vintage=verra_table.vintage,
-        supply=verra_table.supply,
-        amount=carbonmark_table.amount,
-        price=finance_table.price,
-        volume=finance_table.volume,
-        market_cap=finance_table.market_cap,
-        change_percent=finance_table.change_percent,
-        timestamp=finance_table.timestamp,
-    )
-
-    # Write unified data
-    pw.io.jsonlines.write(unified_table, "/app/output/unified.jsonl")
-    
-    # Write finance data
-    pw.io.jsonlines.write(finance_table, "/app/output/finance.jsonl")
-
-    print("✅ Pathway pipeline run complete.")
-    return unified_table, finance_table

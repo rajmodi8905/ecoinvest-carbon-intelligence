@@ -44,6 +44,20 @@
   --radius-md: 6px;
 }
 
+[data-theme="light"] {
+  --bg:             #f4f6f9;
+  --bg-elevated:    #ffffff;
+  --surface:        #ffffff;
+  --surface-2:      #ebf0f5;
+  --surface-hover:  #e0e6ed;
+  --border:         #cbd3df;
+  --border-subtle:  #dde3ed;
+
+  --text-primary:   #111822;
+  --text-secondary: #4a5568;
+  --text-muted:     #718096;
+}
+
 /* ── Reset ───────────────────────────────────── */
 *, *::before, *::after {
   margin: 0;

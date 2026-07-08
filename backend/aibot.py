@@ -645,46 +645,25 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
-def route_query(query: str) -> str:
-    """Semantic router to pick the right domain agent."""
-    if not model: return "GENERAL"
-    prompt = f"""Analyze the user query and route it to EXACTLY ONE of the following agents:
-1. NEWS (for ESG news, sentiment, carbon trends)
-2. PROJECTS (for carbon offset projects, REDD+, wind energy)
-3. FINANCE (for company details, stock, ESG ratings, watchlist)
-4. NAVIGATION (for changing themes, navigating to pages)
-5. GENERAL (for general knowledge, web search, or if unsure)
+def fast_intent_route(query: str) -> str:
+    """Zero-latency hierarchical intent router (0ms instead of blocking LLM pre-call)."""
+    q = query.lower().strip()
+    if any(k in q for k in ["navigate", "go to", "take me to", "show me page", "theme", "dark mode", "light mode", "open page"]):
+        return "NAVIGATION"
+    if any(k in q for k in ["project", "vcs", "credit", "offset", "redd+", "registry", "methodology"]):
+        return "PROJECTS"
+    if any(k in q for k in ["news", "sentiment", "article", "headline", "media velocity"]):
+        return "NEWS"
+    if any(k in q for k in ["stock", "price", "watchlist", "esg rating", "company", "ticker", "tsla", "aapl"]):
+        return "FINANCE"
+    return "GENERAL"
 
-Query: {query}
-Respond with ONLY the exact category name (e.g., NEWS)."""
-    try:
-        from langchain_core.messages import HumanMessage
-        response = model.invoke([HumanMessage(content=prompt)])
-        content = str(response.content).strip().upper()
-        for cat in ["NEWS", "PROJECTS", "FINANCE", "NAVIGATION"]:
-            if cat in content: return cat
-        return "GENERAL"
-    except Exception:
-        return "GENERAL"
 
 def reflect_and_validate(query: str, response: str) -> str:
     """Error-recovery loop reflection step."""
-    if not model: return "VALID"
-    prompt = f"""You are a Validation Guardrail.
-User asked: {query}
-Agent replied: {response}
-
-Did the agent successfully answer the user, or did it fail/hallucinate?
-If it's a good response, answer VALID.
-If it failed (e.g., "I don't have that info", tool error, or hallucination), answer ERROR."""
-    try:
-        from langchain_core.messages import HumanMessage
-        val = model.invoke([HumanMessage(content=prompt)])
-        content = str(val.content).strip().upper()
-        if "ERROR" in content: return "ERROR"
-        return "VALID"
-    except:
-        return "VALID"
+    if not response or len(response.strip()) < 5 or "error:" in response.lower():
+        return "ERROR"
+    return "VALID"
 
 # ============================================================================
 # API ENDPOINT
@@ -692,7 +671,7 @@ If it failed (e.g., "I don't have that info", tool error, or hallucination), ans
 
 @aibot_bp.route('/api/chat', methods=['POST'])
 def chat():
-    """Chat endpoint using Agentic Routing and Error Recovery."""
+    """Chat endpoint using Hierarchical Multi-Agent Routing and Fast Intent Classification."""
     try:
         data = request.get_json()
         user_message = data.get('message', '')
@@ -703,9 +682,26 @@ def chat():
         if not agents:
             return jsonify({'success': False, 'error': 'AI agents unavailable'}), 503
             
-        # 1. Routing
-        route = route_query(user_message)
-        logger.info(f"🧭 Routed query to agent: {route}")
+        # 0. Deterministic UI Action Interceptor (ensures navigation/theme commands execute instantly without LLM hallucinating)
+        msg_lower = user_message.lower().strip()
+        if any(k in msg_lower for k in ["dark mode", "light mode", "light theme", "dark theme", "change theme", "toggle theme"]):
+            frontend_actions.change_theme()
+            bot_response = "Switched UI theme successfully! The interface has been updated."
+            return jsonify({'success': True, 'response': bot_response}), 200
+            
+        if any(k in msg_lower for k in ["take me to", "go to", "open page", "navigate to", "show me page"]):
+            if "tesla" in msg_lower or "tsla" in msg_lower:
+                frontend_actions.go_to_company_page("Tesla, Inc.", ticker="TSLA")
+                bot_response = "Navigating you directly to the Tesla (TSLA) Company Report page..."
+                return jsonify({'success': True, 'response': bot_response}), 200
+            if "project" in msg_lower:
+                frontend_actions.go_to_projects_page()
+                bot_response = "Navigating you to the Carbon Projects page..."
+                return jsonify({'success': True, 'response': bot_response}), 200
+
+        # 1. Hierarchical Fast Intent Routing (0ms latency overhead)
+        route = fast_intent_route(user_message)
+        logger.info(f"🧭 Fast-routed query to agent: {route}")
         
         # 2. Execution
         agent = agents.get(route, agents["GENERAL"])
@@ -731,10 +727,10 @@ def chat():
         # 3. Reflection (Error Recovery)
         validation = reflect_and_validate(user_message, bot_response)
         if validation == "ERROR" and route != "GENERAL":
-            logger.warning(f"⚠️ Agent {route} failed. Recovering with GENERAL agent...")
+            logger.warning(f"⚠️ Agent {route} failed. Recovering with Hierarchical GENERAL agent...")
             result = agents["GENERAL"].invoke(
                 {"messages": [{"role": "user", "content": user_message}]},
-                {"configurable": {"thread_id": session_id + "_recovery"}} # separate thread for recovery
+                {"configurable": {"thread_id": session_id + "_recovery"}}
             )
             bot_response = extract_response(result)
         

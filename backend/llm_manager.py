@@ -110,14 +110,19 @@ def get_llm():
     
     # Get LLM mode from environment (default: ollama)
     llm_mode = os.getenv('LLM_MODE', 'ollama').lower()
-    
     logger.info(f"🔧 Initializing LLM in {llm_mode.upper()} mode...")
     
     try:
         if llm_mode == 'gemini':
             _llm_instance = _create_gemini_llm()
+            if _llm_instance is None:
+                logger.warning("⚠️ Gemini LLM failed or unavailable, falling back to Ollama mode...")
+                _llm_instance = _create_ollama_llm()
         else:  # Default to ollama
             _llm_instance = _create_ollama_llm()
+            if _llm_instance is None and (os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')):
+                logger.warning("⚠️ Ollama LLM failed or unavailable, falling back to Gemini mode...")
+                _llm_instance = _create_gemini_llm()
         
         _llm_initialized = True
         return _llm_instance

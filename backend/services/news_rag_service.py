@@ -74,36 +74,37 @@ class NewsRAGService:
             return
         
         import os
-        if os.environ.get("LLM_MODE") == "ollama":
-            print("📥 Loading Ollama embedding model (nomic-embed-text)...")
-            logger.info("🚀 Loading Ollama embedding model...")
-            from langchain_community.embeddings import OllamaEmbeddings
-            self.embeddings = OllamaEmbeddings(
-                model="nomic-embed-text",
-                base_url=os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-            )
-            print("   ✓ Ollama embedding model loaded")
-        else:
-            print("📥 Loading HuggingFace embedding model...")
-            logger.info("🚀 Loading embedding model...")
-            
-            import torch
-            # Prevent meta tensor initialization issues
-            torch.set_default_dtype(torch.float32)
-            
-            self.embeddings = HuggingFaceEmbeddings(
+        import torch
+        torch.set_default_dtype(torch.float32)
+
+        def _get_hf_embeddings():
+            return HuggingFaceEmbeddings(
                 model_name="sentence-transformers/all-MiniLM-L6-v2",
-                model_kwargs={
-                    'device': 'cpu',
-                    'trust_remote_code': False
-                },
-                encode_kwargs={
-                    'normalize_embeddings': True,
-                    'batch_size': 32
-                },
-                cache_folder=None,  # Use default HuggingFace cache
+                model_kwargs={'device': 'cpu', 'trust_remote_code': False},
+                encode_kwargs={'normalize_embeddings': True, 'batch_size': 32},
                 multi_process=False
             )
+
+        self.embeddings = None
+        if os.environ.get("LLM_MODE") == "ollama":
+            try:
+                print("📥 Loading Ollama embedding model (nomic-embed-text)...")
+                logger.info("🚀 Loading Ollama embedding model...")
+                try:
+                    from langchain_ollama import OllamaEmbeddings
+                except ImportError:
+                    from langchain_community.embeddings import OllamaEmbeddings
+                self.embeddings = OllamaEmbeddings(
+                    model="nomic-embed-text",
+                    base_url=os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+                )
+                print("   ✓ Ollama embedding model loaded")
+            except Exception as embed_err:
+                logger.warning(f"⚠️ Ollama embedding failed ({embed_err}), falling back to HuggingFace CPU embeddings")
+                self.embeddings = _get_hf_embeddings()
+        else:
+            print("📥 Loading HuggingFace embedding model...")
+            self.embeddings = _get_hf_embeddings()
             print("   ✓ Embedding model loaded: sentence-transformers/all-MiniLM-L6-v2")
         logger.info("✅ Embedding model loaded")
         
@@ -394,9 +395,7 @@ class NewsRAGService:
     
     def _check_and_update(self):
         """Background task: check for new articles and add them incrementally."""
-        new_articles = self._get_new_articles()
-        if new_articles:
-            self._add_new_articles()
+        self._add_new_articles()
     
     def start_watching(self, interval: int = 60):
         """Start background thread to watch for news.jsonl changes."""
@@ -514,49 +513,24 @@ class NewsRAGService:
 # ============================================================================
 
 _news_rag_service: Optional[NewsRAGService] = None
+_news_rag_lock = threading.Lock()
 
 
 def get_news_rag_service() -> Optional[NewsRAGService]:
-    """Get or create the global NewsRAGService instance."""
+    """Get or create the global NewsRAGService instance thread-safely."""
     global _news_rag_service
-    
-    if _news_rag_service is None:
-        _news_rag_service = NewsRAGService()
-        _news_rag_service.start_watching(interval=60)  # Check every minute
-    
+    with _news_rag_lock:
+        if _news_rag_service is None:
+            _news_rag_service = NewsRAGService()
+            _news_rag_service.start_watching(interval=60)  # Check every minute
     return _news_rag_service
 
 
 def search_news(query: str, k: int = 5) -> List[Dict]:
-    """
-    Main public function: Search news using RAG.
-    
-    Args:
-        query: Search query or question
-        k: Number of chunks to return
-        
-    Returns:
-        List of dicts with:
-        - 'content': The text content
-        - 'title': Article title
-        - 'source': News source
-        - 'link': URL to original article
-        - 'published': Publication date
-        - 'sentiment': Article sentiment
-        - 'metadata': Full metadata dict
-        - 'score': Similarity score
-    
-    Example:
-        chunks = search_news("carbon credits trends", k=3)
-        for chunk in chunks:
-            print(chunk['title'])
-            print(chunk['source'])
-            print(chunk['link'])
-            print(chunk['content'])
-    """
+    """Main public function: Search news using RAG."""
     service = get_news_rag_service()
     if service:
-        return service.search_news(query, k=k*10)
+        return service.search_news(query, k=k)
     return []
 
 

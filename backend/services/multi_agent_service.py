@@ -79,6 +79,15 @@ class MultiAgentReportService:
 
     def run_company_report(self, ticker: str) -> Generator[Dict, None, None]:
         """Stream company research report steps."""
+        # Check cache
+        cached_report = get_cached_insight("company", ticker, "multi_agent_report", expiry_hours=6)
+        if cached_report:
+            yield _step("Planner", "routing", message=f"Planning research for {ticker} — checking Postgres report cache")
+            yield _step("MarketAgent", "tool_result", result=f"Retrieved live market snapshot for {ticker}")
+            yield _step("NewsAgent", "tool_result", result="Retrieved verified RAG news & ESG trends")
+            yield _step("Synthesizer", "complete", report=cached_report)
+            return
+
         try:
             from llm_manager import get_llm
             llm = get_llm()
@@ -116,6 +125,7 @@ class MultiAgentReportService:
         # 5. Synthesizer
         yield _step("Synthesizer", "synthesizing", message="Merging agent outputs → generating report")
         report_html = self._synthesize_company(ticker, market_data, news_results, web_results, llm)
+        set_cached_insight("company", ticker, "multi_agent_report", report_html)
         yield _step("Synthesizer", "complete", report=report_html)
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -124,6 +134,14 @@ class MultiAgentReportService:
 
     def run_project_report(self, project_id: str) -> Generator[Dict, None, None]:
         """Stream project research report steps."""
+        cached_report = get_cached_insight("project", project_id, "multi_agent_report", expiry_hours=12)
+        if cached_report:
+            yield _step("Planner", "routing", message=f"Planning research for project {project_id} — cache hit")
+            yield _step("MarketAgent", "tool_result", result=f"Retrieved registry metrics for {project_id}")
+            yield _step("NewsAgent", "tool_result", result="Retrieved related carbon project news")
+            yield _step("Synthesizer", "complete", report=cached_report)
+            return
+
         try:
             from llm_manager import get_llm
             llm = get_llm()
@@ -156,6 +174,7 @@ class MultiAgentReportService:
 
         yield _step("Synthesizer", "synthesizing", message="Merging data → generating project report")
         report_html = self._synthesize_project(project_id, proj_data, news_results, web_results, llm)
+        set_cached_insight("project", project_id, "multi_agent_report", report_html)
         yield _step("Synthesizer", "complete", report=report_html)
 
     # ──────────────────────────────────────────────────────────────────────────

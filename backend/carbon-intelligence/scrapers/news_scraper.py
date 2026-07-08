@@ -385,12 +385,12 @@ def run_news_scraper(keywords, companies, conn=None):
     print(f"📡 Fetching from {len(FEEDS)} RSS feeds...")
     
     for url in FEEDS:
+        articles_processed = 0  # Reset per feed so every feed contributes
         try:
             feed = feedparser.parse(url)
 
-            
             for entry in feed.entries:
-                if articles_processed >= 10:
+                if articles_processed >= 25:  # Up to 25 articles per feed
                     break
                 articles_processed += 1
 

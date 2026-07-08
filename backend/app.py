@@ -221,18 +221,31 @@ pusher_thread.start()
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint — probes real service availability"""
+    db_ok = False
+    try:
+        conn = pathway_reader._get_db_connection()
+        conn.close()
+        db_ok = True
+    except Exception:
+        pass
+
+    status = 'healthy' if db_ok else 'degraded'
+    code   = 200        if db_ok else 503
+
     return jsonify({
-        'status': 'healthy',
+        'status': status,
         'services': {
+            'database':  'operational' if db_ok       else 'unreachable',
+            'rag':       'operational' if RAG_AVAILABLE else 'unavailable',
             'live_news': 'operational',
             'watchlist': 'operational',
-            'projects': 'operational',
+            'projects':  'operational',
             'analytics': 'operational',
-            'company': 'operational'
+            'company':   'operational',
         },
         'timestamp': datetime.now().isoformat()
-    })
+    }), code
 
 # In-memory cache for yfinance history to prevent rate limiting
 yfinance_cache = {}
@@ -308,10 +321,9 @@ def fast_rag_search():
         from services.news_rag_service import search_news
         from services.projects_rag_service import search_projects
         
-        # Parallel fetch could be added here, but sequential is fine for now 
-        # since individual latencies are sub-second
-        news_results = search_news(query, limit=3)
-        project_results = search_projects(query, limit=3)
+        # Hybrid RAG search (FAISS + BM25 with RRF fusion)
+        news_results    = search_news(query, k=3)
+        project_results = search_projects(query, k=3)
         
         return jsonify({
             'success': True,

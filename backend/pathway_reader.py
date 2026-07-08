@@ -37,6 +37,10 @@ class PathwayDataReader:
         }
         self.use_db = self._test_db_connection()
         
+        # gRPC tier: Flask → gRPC → carbon_pathway → Pathway data
+        # Tested once at startup; if carbon_pathway isn't up yet, falls back to DB
+        self.use_grpc = self._test_grpc_connection()
+        
         # Cache with timestamps and file modification tracking
         self._cache = {
             'projects': {'data': [], 'timestamp': None, 'file_mtime': None},
@@ -45,11 +49,21 @@ class PathwayDataReader:
         }
         self._cache_ttl = 2  # Cache for 2 seconds minimum (to avoid thrashing)
         
+        # DB-change polling state (for has_changes() when use_db=True)
+        self._last_db_poll: float = 0.0
+        self._last_news_ts: str   = None
+        self._last_finance_ts: str = None
+        self._last_verra_ts: str  = None
+        
         self.socketio = None
         
         logger.info(f"✅ Pathway reader initialized: {pathway_output_dir}")
-        if self.use_db:
+        if self.use_grpc:
+            logger.info(f"⚡ gRPC tier enabled (carbon_pathway:{os.getenv('PATHWAY_GRPC_PORT','50051')})")
+        elif self.use_db:
             logger.info(f"✅ Direct database connection enabled: {self.db_config['host']}")
+        else:
+            logger.info("📁 Falling back to JSONL file reads")
             
         self._setup_watchdog()
         
@@ -112,6 +126,15 @@ class PathwayDataReader:
                             'latency_ms': round(latency_ms, 2)
                         })
     
+    def _test_grpc_connection(self) -> bool:
+        """Test if the carbon_pathway gRPC server is reachable."""
+        try:
+            from grpc_client import test_grpc_connection
+            return test_grpc_connection()
+        except Exception as e:
+            logger.warning(f"gRPC client import error: {e}")
+            return False
+
     def _test_db_connection(self) -> bool:
         """Test if database connection is available"""
         try:
@@ -183,118 +206,159 @@ class PathwayDataReader:
         return age > self._cache_ttl
     
     def get_projects(self, country: Optional[str] = None, limit: int = 1000) -> List[Dict]:
-        """Get carbon projects from Pathway output or database"""
-        # Try database first if available
+        """Get carbon projects — gRPC → DB → JSONL fallback chain."""
+        # Tier 1: gRPC (data through Pathway pipeline)
+        if self.use_grpc:
+            try:
+                from grpc_client import get_projects_grpc
+                projects = get_projects_grpc(country=country, limit=limit)
+                if projects:
+                    logger.info(f"⚡ gRPC: {len(projects)} projects")
+                    return projects
+            except Exception as e:
+                logger.warning(f"gRPC projects tier failed: {e}")
+
+        # Tier 2: Direct DB
         if self.use_db:
             try:
                 conn = self._get_db_connection()
                 cur = conn.cursor()
-                
-                query = "SELECT * FROM verra"
+                query  = "SELECT * FROM verra"
                 params = []
-                
                 if country:
                     query += " WHERE country = %s"
                     params.append(country)
-                
                 query += f" ORDER BY updated_at DESC LIMIT {limit}"
-                
                 cur.execute(query, params)
                 projects = [dict(row) for row in cur.fetchall()]
                 cur.close()
                 conn.close()
-                
                 logger.info(f"📊 Fetched {len(projects)} projects from database")
                 return projects
             except Exception as e:
                 logger.error(f"Database error: {e}, falling back to JSONL")
-        
-        # Fallback to JSONL
+
+        # Tier 3: JSONL fallback
         if self._should_refresh_cache('projects', self.projects_file):
             self._cache['projects']['data'] = self._read_jsonl_file(self.projects_file, max_records=1000)
             self._cache['projects']['timestamp'] = datetime.now()
-        
         projects = self._cache['projects']['data']
-        
         if country:
             projects = [p for p in projects if p.get('country') == country]
-        
         return projects[:limit]
     
     def get_finance(self, ticker: Optional[str] = None) -> List[Dict]:
-        """Get finance data from database or Pathway output"""
-        # Try database first for complete data
+        """Get finance data — gRPC → DB → JSONL fallback chain."""
+        # Tier 1: gRPC
+        if self.use_grpc:
+            try:
+                from grpc_client import get_finance_grpc
+                data = get_finance_grpc(ticker=ticker)
+                if data:
+                    logger.info(f"⚡ gRPC: {len(data)} finance records")
+                    return data
+            except Exception as e:
+                logger.warning(f"gRPC finance tier failed: {e}")
+
+        # Tier 2: DB
         if self.use_db:
             try:
                 conn = self._get_db_connection()
-                cur = conn.cursor()
-                
+                cur  = conn.cursor()
                 if ticker:
-                    query = "SELECT * FROM finance WHERE ticker = %s"
-                    cur.execute(query, (ticker,))
+                    cur.execute("SELECT * FROM finance WHERE ticker = %s", (ticker,))
                 else:
-                    query = "SELECT * FROM finance ORDER BY updated_at DESC"
-                    cur.execute(query)
-                
+                    cur.execute("SELECT * FROM finance ORDER BY updated_at DESC")
                 finance_data = [dict(row) for row in cur.fetchall()]
                 cur.close()
                 conn.close()
-                
                 logger.info(f"📊 Fetched {len(finance_data)} finance records from database")
                 return finance_data
             except Exception as e:
                 logger.error(f"Database error: {e}, falling back to JSONL")
-        
-        # Fallback to JSONL
+
+        # Tier 3: JSONL fallback
         if self._should_refresh_cache('finance', self.finance_file):
             self._cache['finance']['data'] = self._read_jsonl_file(self.finance_file)
             self._cache['finance']['timestamp'] = datetime.now()
-        
         finance_data = self._cache['finance']['data']
-        
         if ticker:
             finance_data = [f for f in finance_data if f.get('ticker') == ticker]
-        
         return finance_data
     
     def get_news(self, source: Optional[str] = None, limit: int = 250) -> List[Dict]:
-        """Get news from database or Pathway output"""
-        # Try database first for complete data
+        """Get news — gRPC → DB → JSONL fallback chain."""
+        # Tier 1: gRPC
+        if self.use_grpc:
+            try:
+                from grpc_client import get_news_grpc
+                data = get_news_grpc(source=source, limit=limit)
+                if data:
+                    logger.info(f"⚡ gRPC: {len(data)} news articles")
+                    return data
+            except Exception as e:
+                logger.warning(f"gRPC news tier failed: {e}")
+
+        # Tier 2: DB
         if self.use_db:
             try:
                 conn = self._get_db_connection()
-                cur = conn.cursor()
-                
-                query = "SELECT * FROM news"
+                cur  = conn.cursor()
+                query  = "SELECT * FROM news"
                 params = []
-                
                 if source:
                     query += " WHERE source = %s"
                     params.append(source)
-                
                 query += f" ORDER BY published DESC LIMIT {limit}"
-                
                 cur.execute(query, params)
                 news_data = [dict(row) for row in cur.fetchall()]
                 cur.close()
                 conn.close()
-                
                 logger.info(f"📊 Fetched {len(news_data)} news articles from database")
                 return news_data
             except Exception as e:
                 logger.error(f"Database error: {e}, falling back to JSONL")
-        
-        # Fallback to JSONL
+
+        # Tier 3: JSONL fallback
         if self._should_refresh_cache('news', self.news_file):
             self._cache['news']['data'] = self._read_jsonl_file(self.news_file, max_records=250)
             self._cache['news']['timestamp'] = datetime.now()
-        
         news_data = self._cache['news']['data']
-        
         if source:
             news_data = [n for n in news_data if n.get('source') == source]
-        
         return news_data[:limit]
+
+    def get_pathway_enriched(self, entity_type: str = None, entity_id: str = None) -> List[Dict]:
+        """Fetch Pathway-computed enriched signals from pathway_enriched table.
+        Returns live signals computed by the Pathway streaming pipeline.
+        analytics_service uses this to add pathway_computed=True badge in UI.
+        """
+        if not self.use_db:
+            return []
+        try:
+            conn = self._get_db_connection()
+            cur  = conn.cursor()
+            query  = """
+                SELECT entity_type, entity_id, metric_key, metric_value, extra_json, computed_at
+                FROM pathway_enriched
+                WHERE computed_at > NOW() - INTERVAL '15 minutes'
+            """
+            params = []
+            if entity_type:
+                query += " AND entity_type = %s"
+                params.append(entity_type)
+            if entity_id:
+                query += " AND entity_id = %s"
+                params.append(entity_id)
+            query += " ORDER BY computed_at DESC"
+            cur.execute(query, params)
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            conn.close()
+            return rows
+        except Exception as e:
+            logger.warning(f"get_pathway_enriched() failed: {e}")
+            return []
     
     def get_analytics(self) -> Dict[str, Any]:
         """Generate analytics from current data"""
@@ -339,22 +403,57 @@ class PathwayDataReader:
         }
     
     def has_changes(self) -> bool:
-        """Check if any data files have been modified since last read"""
-        # If using database, don't rely on file changes (database changes via CDC/Kafka)
-        if self.use_db:
-            return False  # Database updates are handled differently, not file-based
-        
-        files_to_check = [
-            ('projects', self.projects_file),
-            ('finance', self.finance_file),
-            ('news', self.news_file)
-        ]
-        
-        for cache_key, filepath in files_to_check:
-            if self._file_changed(filepath, cache_key):
-                return True
-        
-        return False
+        """Check if any data has changed since last read.
+        When DB is available, polls MAX(updated_at/published) per table every 5s.
+        When file-based, checks file modification times.
+        """
+        if not self.use_db:
+            # File-based fallback (original logic)
+            files_to_check = [
+                ('projects', self.projects_file),
+                ('finance',  self.finance_file),
+                ('news',     self.news_file),
+            ]
+            for cache_key, filepath in files_to_check:
+                if self._file_changed(filepath, cache_key):
+                    return True
+            return False
+
+        # DB-based: poll every 5 seconds max to avoid hammering Postgres
+        now = time.time()
+        if now - self._last_db_poll < 5.0:
+            return False
+        self._last_db_poll = now
+
+        try:
+            conn = self._get_db_connection()
+            cur  = conn.cursor()
+
+            changed = False
+            checks = [
+                ('news',    'MAX(published)',   '_last_news_ts'),
+                ('finance', 'MAX(updated_at)',  '_last_finance_ts'),
+                ('verra',   'MAX(updated_at)',  '_last_verra_ts'),
+            ]
+            for table, agg, attr in checks:
+                try:
+                    cur.execute(f"SELECT {agg} FROM {table}")
+                    row = cur.fetchone()
+                    val = str(row[0]) if row and row[0] else None
+                    prev = getattr(self, attr)
+                    if val != prev:
+                        setattr(self, attr, val)
+                        changed = True
+                        logger.debug(f"🔄 Change detected in {table}: {prev} → {val}")
+                except Exception as te:
+                    logger.debug(f"Change check for {table} failed: {te}")
+
+            cur.close()
+            conn.close()
+            return changed
+        except Exception as e:
+            logger.error(f"has_changes() DB poll failed: {e}")
+            return False
     
     def search_projects(self, query: str, limit: int = 50) -> List[Dict]:
         """Search projects by name, country, or category"""
