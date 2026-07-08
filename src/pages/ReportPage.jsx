@@ -41,6 +41,8 @@ const ReportPage = () => {
   
   const [activeTab, setActiveTab] = React.useState('Overview');
   const [reportHtml, setReportHtml] = React.useState(() => sessionStorage.getItem(`report_${id}`) || '');
+  const [isGenerating, setIsGenerating] = React.useState(false);
+  const [currentStep, setCurrentStep] = React.useState(null);
 
   // Reset report if we navigate to a new ID that isn't cached
   React.useEffect(() => {
@@ -238,20 +240,59 @@ const ReportPage = () => {
               <AgentTracePanel 
                 id={id}
                 streamUrl={`${API_BASE_URL}/api/${isProject ? 'project' : 'company'}/${id}/report/stream`}
+                onStart={() => {
+                  setIsGenerating(true);
+                  setCurrentStep(null);
+                }}
+                onStep={(step) => {
+                  setCurrentStep(step);
+                }}
                 onComplete={html => {
                   setReportHtml(html);
                   sessionStorage.setItem(`report_${id}`, html);
+                  setIsGenerating(false);
+                }}
+                onReset={() => {
+                  setIsGenerating(false);
+                  setCurrentStep(null);
+                  setReportHtml('');
+                  sessionStorage.removeItem(`report_${id}`);
                 }}
               />
             </div>
             
-            {/* Right: Rendered Report */}
-            <div className="panel" style={{ padding: '24px 32px', overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+            <div className="panel" style={{ padding: '24px 32px', overflowY: 'auto', maxHeight: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column' }}>
               {reportHtml ? (
                 <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
                   <ReactMarkdown className="report-content markdown-body">
                     {reportHtml}
                   </ReactMarkdown>
+                </div>
+              ) : isGenerating ? (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', gap: 16 }}>
+                  <div className="animate-spin" style={{ fontSize: 24, color: 'var(--green)' }}>◌</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>
+                    AI is executing reasoning loop...
+                  </div>
+                  {currentStep && (
+                    <div style={{ 
+                      fontSize: 11, 
+                      color: 'var(--text-secondary)', 
+                      fontFamily: 'var(--mono)', 
+                      background: 'var(--surface-hover)', 
+                      padding: '10px 16px', 
+                      borderRadius: 4, 
+                      maxWidth: '85%', 
+                      textAlign: 'center',
+                      border: '1px solid var(--border-subtle)',
+                      wordBreak: 'break-word'
+                    }}>
+                      <span style={{ fontWeight: 600, color: 'var(--green)', marginRight: 6 }}>
+                        [{currentStep.agent}]
+                      </span>
+                      {currentStep.message || (currentStep.step === 'tool_call' ? `Calling tool: ${currentStep.tool}` : currentStep.result ? `Obtained tool result: ${currentStep.result}` : 'Thinking...')}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>

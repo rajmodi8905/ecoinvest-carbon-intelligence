@@ -24,8 +24,11 @@ const STATUS_ICON = {
  * Props:
  *   streamUrl: string   — SSE endpoint URL
  *   onComplete: fn(html) — called when report is ready
+ *   onStart: fn()        — called when stream starts
+ *   onStep: fn(step)     — called when a new step arrives
+ *   onReset: fn()        — called when trace is reset
  */
-const AgentTracePanel = ({ id, streamUrl, onComplete }) => {
+const AgentTracePanel = ({ id, streamUrl, onComplete, onStart, onStep, onReset }) => {
   const [steps, setSteps]     = React.useState(() => {
     try {
       const cached = sessionStorage.getItem(`trace_steps_${id}`);
@@ -70,6 +73,7 @@ const AgentTracePanel = ({ id, streamUrl, onComplete }) => {
     setError(null);
     setStreaming(true);
     startTimeRef.current = performance.now();
+    onStart?.();
 
     const es = new EventSource(streamUrl);
     esRef.current = es;
@@ -96,6 +100,8 @@ const AgentTracePanel = ({ id, streamUrl, onComplete }) => {
         
         const elapsed = ((performance.now() - startTimeRef.current) / 1000).toFixed(1);
         const newData = { ...data, timeElapsed: `+${elapsed}s` };
+        onStep?.(newData);
+        
         setSteps(prev => {
           const next = [...prev, newData];
           stepsRef.current = next;
@@ -120,6 +126,7 @@ const AgentTracePanel = ({ id, streamUrl, onComplete }) => {
     setError(null);
     setStreaming(false);
     sessionStorage.removeItem(`trace_steps_${id}`);
+    onReset?.();
   };
 
   return (
