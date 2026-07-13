@@ -280,7 +280,7 @@ def build_pipeline():
     )
 
     news = news_raw.filter(pw.this.payload["after"].is_not_none()).select(
-        id=pw.this.payload["after"]["id"].as_str(),
+        news_id=pw.this.payload["after"]["id"].as_str(),
         title=pw.this.payload["after"]["title"].as_str(),
         summary=pw.this.payload["after"]["summary"].as_str(),
         link=pw.this.payload["after"]["link"].as_str(),

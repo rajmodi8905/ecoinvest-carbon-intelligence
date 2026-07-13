@@ -158,21 +158,28 @@ class CarbonServicer(pb2_grpc.CarbonServiceServicer):
                     data = json.loads(line)
                     if data.get('diff', 1) == 1:  # Only active records
                         if not request.ticker or data.get('ticker') == request.ticker:
+                            def safe_int(val, d=0):
+                                try: return int(val) if val is not None else d
+                                except: return d
+                            def safe_float(val, d=0.0):
+                                try: return float(val) if val is not None else d
+                                except: return d
+
                             item_dict = {
                                 'ticker': data.get('ticker', ''),
-                                'company_name': data.get('company_name', data.get('ticker', '')),
-                                'industry': data.get('industry', 'Technology'),
+                                'company_name': data.get('company_name') or data.get('ticker', ''),
+                                'industry': data.get('industry') or 'Technology',
                                 'description': data.get('description', ''),
-                                'gii_score': int(data.get('gii_score', 75)),
-                                'stock_price': float(data.get('stock_price', data.get('price', 0))),
-                                'market_cap': str(data.get('market_cap', '0B')),
+                                'gii_score': safe_int(data.get('gii_score'), 75),
+                                'stock_price': safe_float(data.get('stock_price') or data.get('price'), 0.0),
+                                'market_cap': str(data.get('market_cap') or '0B'),
                                 'sustainability_update': data.get('sustainability_update', ''),
-                                'esg_rating': data.get('esg_rating', 'A'),
+                                'esg_rating': data.get('esg_rating') or 'A',
                                 'website': data.get('website', ''),
-                                'price': float(data.get('price', 0)),
-                                'volume': int(data.get('volume', 0)),
-                                'change_percent': float(data.get('change_percent', 0)),
-                                'timestamp': int(data.get('timestamp', 0))
+                                'price': safe_float(data.get('price'), 0.0),
+                                'volume': safe_int(data.get('volume'), 0),
+                                'change_percent': safe_float(data.get('change_percent'), 0.0),
+                                'timestamp': safe_int(data.get('timestamp'), 0)
                             }
                             items.append(item_dict)
                 except (json.JSONDecodeError, ValueError, KeyError) as e:
@@ -183,7 +190,7 @@ class CarbonServicer(pb2_grpc.CarbonServiceServicer):
                 'count': len(items)
             }
             
-            cache_set(cache_key, response, ttl=60)  # Cache for 1 minute
+            cache_set(cache_key, response)
             return pb2.FinanceResponse(
                 items=[pb2.FinanceItem(**item) for item in items],
                 count=len(items)
