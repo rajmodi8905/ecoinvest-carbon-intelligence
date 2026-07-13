@@ -2,39 +2,7 @@
 
 CarbonMark Terminal is a high-performance, real-time ESG and Carbon Market Intelligence dashboard modeled after the Bloomberg Terminal. It combines low-latency streaming data pipelines, hybrid RAG semantic search, and multi-agent AI systems to provide deep-dive analysis on carbon-exposed equities and carbon offset projects.
 
-## 🚀 Key Architectural Pillars
-
-```
-                     ┌───────────────────┐
-                     │   Data Scrapers   │ (Yahoo Finance, News RSS, Verra Registry)
-                     └─────────┬─────────┘
-                               │ (Writes)
-                               ▼
-                     ┌───────────────────┐
-                     │    PostgreSQL     │ (Main Database)
-                     └─────────┬─────────┘
-                               │ (Change Data Capture)
-                               ▼
-                     ┌───────────────────┐
-                     │ Debezium Connect  │
-                     └─────────┬─────────┘
-                               │ (Streams CDC Events)
-                               ▼
-                     ┌───────────────────┐
-                     │   Apache Kafka    │ (Distributed Event Streaming)
-                     └─────────┬─────────┘
-                               │ (Low-latency Stream Enrichment)
-                               ▼
-                     ┌───────────────────┐
-                     │ Pathway Engine &  │ ◄─── (Vector Search &
-                     │   gRPC Service    │       Live Signal Calculations)
-                     └─────────┬─────────┘
-                               │ (WebSocket / REST API)
-                               ▼
-                     ┌───────────────────┐
-                     │  React Frontend   │ (Bloomberg UI & Live Signals)
-                     └───────────────────┘
-```
+![Backend Architecture](image.png)
 
 1. **Low-Latency Streaming Pipeline (Kafka & Debezium CDC)**
    - Captures transactions and raw data updates in PostgreSQL via **Debezium CDC** (Change Data Capture).
